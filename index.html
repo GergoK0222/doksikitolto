@@ -681,27 +681,50 @@ function renderDataPreview(rows){
   const el=document.getElementById('dataPreview');
   if(!rows.length){ el.innerHTML='<div class="small">Nincs adat a táblában.</div>'; return; }
   const heads=Object.keys(rows[0]);
-  const imgCols = guessImageColumns(heads);
+
+  // Automatikus + kézi (felhasználó által kijelölt) képoszlopok
+  const autoImgCols = guessImageColumns(heads);
+  const userImgCols = loadUserImgCols().filter(c=>heads.includes(c));
+  const imgCols = Array.from(new Set([...autoImgCols, ...userImgCols]));
   window.__imgCols = imgCols;
+
   let html='<div class="small">Oszlopok: '+heads.map(h=>`<span class="pill">${escapeHtml(h)}</span>`).join(' ')+'</div>';
+
+  // Képoszlop kijelölő UI (hogy ne kelljen átnevezni az oszlopot)
+  html += `<div class="small" style="margin-top:8px;color:var(--muted)">
+    <div style="margin-bottom:6px"><b>Képoszlop(ok) kijelölése</b> – pipáld be, melyik oszlopban szeretnél Drive-ból képet választani (mentjük a böngészőben).</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px" id="imgColsChooser">
+      ${heads.map(h=>{
+        const checked = imgCols.includes(h) ? "checked" : "";
+        return `<label class="pill2" style="cursor:pointer;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" data-imgcol="${escapeHtml(h)}" ${checked} />
+          ${escapeHtml(h)}
+        </label>`;
+      }).join("")}
+    </div>
+  </div>`;
+
   if(imgCols.length){
-    html+='<div class="small" style="margin-top:4px;color:var(--muted)">Kép oszlop(ok) felismerve: '+imgCols.map(h=>`<span class="pill2">${escapeHtml(h)}</span>`).join(' ')+'</div>';
+    html+='<div class="small" style="margin-top:6px;color:var(--muted)">Aktív képoszlop(ok): '+imgCols.map(h=>`<span class="pill2">${escapeHtml(h)}</span>`).join(' ')+'</div>';
   }else{
-    html+='<div class="small" style="margin-top:4px;color:var(--muted)">Kép oszlop nem felismerhető automatikusan. Ha van képoszlopod, nevezd pl. „Kép”, „Foto”, „ImageURL”.</div>';
+    html+='<div class="small" style="margin-top:6px;color:var(--muted)">Nincs aktív képoszlop kijelölve.</div>';
   }
+
   html+='<table><thead><tr>'+heads.map(h=>`<th>${escapeHtml(h)}</th>`).join('')+'</tr></thead><tbody>';
+
+  // (Tartjuk az eredeti 8 soros előnézetet – ha kell, később bővíthető lapozással)
   rows.slice(0,8).forEach((r,idx)=>{
     const realIndex = idx;
     html+='<tr>'+heads.map(h=>{
       const v = String(r[h] ?? '').trim();
       if(imgCols.includes(h)){
         if(!v){
-          return `<td><button type="button" class="docTypeRowBtn" data-imgpick="1" data-row="${realIndex}" data-col="${encodeURIComponent(h)}">Válassz képet</button></td>`;
+          return `<td><button type="button" class="docTypeRowBtn" data-imgpick="1" data-row="${realIndex}" data-col="${encodeURIComponent(h)}">Válassz képet (Drive)</button></td>`;
         }
         const short = v.length>64 ? v.slice(0,64)+'…' : v;
         return `<td><div class="small" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                   <span class="pill2" title="${escapeHtml(v)}">${escapeHtml(short)}</span>
-                  <button type="button" class="docTypeRowBtn" data-imgpick="1" data-row="${realIndex}" data-col="${encodeURIComponent(h)}">Csere</button>
+                  <button type="button" class="docTypeRowBtn" data-imgpick="1" data-row="${realIndex}" data-col="${encodeURIComponent(h)}">Csere (Drive)</button>
                 </div></td>`;
       }
       return `<td>${escapeHtml(String(r[h]).slice(0,120))}</td>`;
@@ -709,6 +732,22 @@ function renderDataPreview(rows){
   });
   html+='</tbody></table>';
   el.innerHTML=html;
+
+  // Képoszlop pipák eseménykezelő
+  const chooser = el.querySelector("#imgColsChooser");
+  if(chooser){
+    chooser.querySelectorAll('input[type="checkbox"][data-imgcol]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const name = cb.getAttribute('data-imgcol') || "";
+        const current = new Set(loadUserImgCols().filter(c=>heads.includes(c)));
+        if(cb.checked) current.add(name); else current.delete(name);
+        saveUserImgCols(Array.from(current));
+        renderDataPreview(rows);
+      });
+    });
+  }
+
+  // Drive képválasztó gombok
   Array.from(el.querySelectorAll('button[data-imgpick="1"]')).forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const rowIndex = parseInt(btn.getAttribute('data-row'),10);
