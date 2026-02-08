@@ -1301,6 +1301,26 @@ async function driveApiDownload(url){
   return resp.arrayBuffer();
 }
 
+
+async function convertArrayBufferToPng(buf, mimeHint){
+  // Converts an image ArrayBuffer (webp/png/jpg/...) to PNG using browser decoding.
+  // Note: HEIC/HEIF usually cannot be decoded by browsers without extra libs.
+  const blob = new Blob([buf], {type: mimeHint || "application/octet-stream"});
+  let bmp;
+  try{
+    bmp = await createImageBitmap(blob);
+  }catch(e){
+    throw new Error("A kiválasztott kép formátuma nem konvertálható a böngészőben. (Próbáld JPG/PNG formátumban feltölteni.)");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = bmp.width; canvas.height = bmp.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bmp, 0, 0);
+  const outBlob = await new Promise((resolve)=>canvas.toBlob(resolve, "image/png"));
+  if(!outBlob) throw new Error("PNG konvertálás sikertelen.");
+  return await outBlob.arrayBuffer();
+}
+
 async function listSharedDrives(){
   // Shared Drives list (if the account has access). Falls back silently if not permitted.
   try{
@@ -1558,14 +1578,55 @@ window.openImagePickerForCell = async function(rowIndex, colName){
 async function fetchImageFromDriveRef(ref){
   const fileId = String(ref||"").replace(/^drive:/i,"").trim();
   if(!fileId) return null;
-  const metaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=name,mimeType&supportsAllDrives=true`;
+
+  const metaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size&supportsAllDrives=true`;
   const meta = await driveApiGet(metaUrl);
-  const mime = meta.mimeType || "";
+  const mime = (meta.mimeType || "").toLowerCase();
   const name = meta.name || "";
-  const map = {"image/png":"png","image/jpeg":"jpg","image/gif":"gif","image/bmp":"bmp","image/tiff":"tiff","image/svg+xml":"svg","image/x-emf":"emf","image/x-wmf":"wmf"};
+  const size = meta.size ? Number(meta.size) : null;
+
+  // Determine extension from mime/name
+  const map = {
+    "image/png":"png",
+    "image/jpeg":"jpg",
+    "image/jpg":"jpg",
+    "image/gif":"gif",
+    "image/bmp":"bmp",
+    "image/tiff":"tiff",
+    "image/svg+xml":"svg",
+    "image/x-emf":"emf",
+    "image/x-wmf":"wmf",
+    "image/webp":"webp",
+    "image/heic":"heic",
+    "image/heif":"heif",
+    "image/avif":"avif"
+  };
   let ext = map[mime] || (name.toLowerCase().match(/\.([a-z0-9]+)$/)||[])[1] || "png";
+
   const dlUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-  const buf = await driveApiDownload(dlUrl);
+  let buf = await driveApiDownload(dlUrl);
+
+  // Word támogatás: jellemzően PNG/JPG/GIF/BMP/TIFF/EMF/WMF/SVG.
+  // Ha webp/heic/heif/avif, próbáljuk PNG-re konvertálni (ha a böngésző tudja).
+  const supported = ["png","jpg","jpeg","gif","bmp","tif","tiff","emf","wmf","svg"];
+  const extNorm = ext.toLowerCase();
+
+  if(!supported.includes(extNorm)){
+    // HEIC/HEIF gyakran nem dekódolható böngészőben → adjunk egyértelmű hibát
+    if(extNorm === "heic" || extNorm === "heif"){
+      throw new Error("HEIC/HEIF képet választottál. A Word (és a legtöbb böngésző) ezt nem kezeli megbízhatóan. Kérlek, alakítsd át JPG/PNG formátumra és úgy töltsd fel a Drive-ra.");
+    }
+    try{
+      const mimeHint = mime && mime.startsWith("image/") ? mime : "image/"+extNorm;
+      const pngBuf = await convertArrayBufferToPng(buf, mimeHint);
+      buf = pngBuf;
+      ext = "png";
+      if(typeof log==="function") log(`Drive kép konvertálva PNG-re: ${name || fileId} (${extNorm} → png${size?`, ${Math.round(size/1024)} KB`:''})`);
+    }catch(err){
+      throw new Error((err && err.message) ? err.message : "Ismeretlen képformátum. Kérlek, JPG/PNG-t használj.");
+    }
+  }
+
   return {buf, ext};
 }
 
