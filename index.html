@@ -1237,6 +1237,7 @@ let imgPickerStack = []; // [{id,name}]
 let imgPickerCurrentFolderId = "root";
 let imgPickerCurrentDriveId = null; // Shared Drive ID when browsing a shared drive
 let imgPickerDrives = []; // cached shared drives list
+let imgPickerSharedFolders = []; // cached "Velem megosztott" mappák
 
 let imgPickerImages = [];
 
@@ -1321,6 +1322,27 @@ async function listSharedDrives(){
   }
 }
 
+async function listSharedWithMeFolders(){
+  // "Shared with me" folders (not Shared Drives). These are not necessarily under 'root'.
+  try{
+    const fields = encodeURIComponent("files(id,name),nextPageToken");
+    let pageToken = "";
+    let out = [];
+    do{
+      const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+      const q = encodeURIComponent("sharedWithMe and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=200&fields=${fields}${tokenParam}&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+      const j = await driveApiGet(url);
+      out = out.concat(j.files||[]);
+      pageToken = j.nextPageToken || "";
+    }while(pageToken);
+    out.sort((a,b)=>(a.name||"").localeCompare(b.name||"",'hu'));
+    return out;
+  }catch(err){
+    return [];
+  }
+}
+
 function currentDriveName(){
   if(!imgPickerCurrentDriveId) return "My Drive";
   const d = (imgPickerDrives||[]).find(x=>x.id===imgPickerCurrentDriveId);
@@ -1397,16 +1419,28 @@ function renderImgPickerFolders(folders){
   const isMyDriveRoot = (!imgPickerCurrentDriveId && imgPickerCurrentFolderId==="root" && !imgPickerStack.length);
 
   const drives = (isMyDriveRoot ? (imgPickerDrives||[]) : []);
-  const driveHtml = drives.length ? (
+  const sharedFolders = (isMyDriveRoot ? (imgPickerSharedFolders||[]) : []);
+  const driveHtml = (isMyDriveRoot ? (
+  (drives.length ? (
     `<div class="small" style="margin:4px 0 6px;color:var(--muted)">Megosztott meghajtók</div>` +
     drives.map(d=>(
       `<div class="driveRow folderRow" data-drive="${d.id}" title="${escapeHtml(d.id)}">
          <div>🗄️ ${escapeHtml(d.name||"(névtelen meghajtó)")}</div>
          <div class="small" style="opacity:.8">Megnyit</div>
        </div>`
-    )).join("") +
-    `<div class="small" style="margin:10px 0 6px;color:var(--muted)">Mappák (My Drive)</div>`
-  ) : (isMyDriveRoot ? `<div class="small" style="margin:4px 0 6px;color:var(--muted)">Mappák (My Drive)</div>` : "");
+    )).join("")
+  ) : "") +
+  (sharedFolders.length ? (
+    `<div class="small" style="margin:10px 0 6px;color:var(--muted)">Velem megosztott mappák</div>` +
+    sharedFolders.map(f=>(
+      `<div class="sharedRow folderRow" data-shared="${f.id}" title="${escapeHtml(f.id)}">
+         <div>🤝📁 ${escapeHtml(f.name||"(névtelen)")}</div>
+         <div class="small" style="opacity:.8">Megnyit</div>
+       </div>`
+    )).join("")
+  ) : "") +
+  `<div class="small" style="margin:10px 0 6px;color:var(--muted)">Mappák (My Drive)</div>`
+) : "");
 
   const folderHtml = (folders && folders.length) ? folders.map(f=>(
     `<div class="folderRow" data-folder="${f.id}" title="${escapeHtml(f.id)}">
@@ -1435,6 +1469,16 @@ function renderImgPickerFolders(folders){
     });
   });
 }
+
+  Array.from(imgPickerFolders.querySelectorAll(".sharedRow[data-shared]")).forEach(row=>{
+    row.addEventListener("click", async ()=>{
+      const id = row.getAttribute("data-shared");
+      const name = (row.textContent||"").replace("🤝📁","").trim() || "Megosztott mappa";
+      imgPickerCurrentDriveId = null; // shared-with-me folders are in user corpus
+      imgPickerStack = [{id, name}];
+      await imgPickerNavigateTo(id);
+    });
+  });
 
 function renderImgPickerGrid(){
   if(!imgPickerGrid) return;
@@ -1472,6 +1516,7 @@ async function imgPickerNavigateTo(folderId){
   // Load Shared Drives list when we are at My Drive root
   if(!imgPickerCurrentDriveId && imgPickerCurrentFolderId==="root" && !imgPickerStack.length){
     imgPickerDrives = await listSharedDrives();
+    imgPickerSharedFolders = await listSharedWithMeFolders();
   }
   if(imgPickerHint){
     const col = imgPickerCtx && imgPickerCtx.colName ? ` • oszlop: ${imgPickerCtx.colName}` : "";
