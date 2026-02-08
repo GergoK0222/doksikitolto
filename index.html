@@ -1525,7 +1525,15 @@ function renderImgPickerGrid(){
       const id = tile.getAttribute("data-file");
       const file = imgPickerImages.find(x=>x.id===id);
       if(!id || imgPickerCtx.rowIndex==null || !imgPickerCtx.colName) return;
-      dataRows[imgPickerCtx.rowIndex][imgPickerCtx.colName] = "drive:" + id;
+      // Írjuk vissza a tényleges oszlopkulcsra (előfordul, hogy a preview-ban normalizált név van)
+      const rowObj = dataRows[imgPickerCtx.rowIndex] || {};
+      let key = imgPickerCtx.colName;
+      if(!(key in rowObj)){
+        const k2 = Object.keys(rowObj).find(h=>norm(h)===norm(key));
+        if(k2) key = k2;
+      }
+      rowObj[key] = "drive:" + id;
+      imgPickerCtx.colName = key;
       if(typeof log==="function") log(`Kép kiválasztva (sor ${imgPickerCtx.rowIndex+1}, oszlop ${imgPickerCtx.colName}): ${(file && file.name) || id}`,'ok');
       showImgPicker(false);
       renderDataPreview(dataRows);
