@@ -349,6 +349,8 @@ break;case"layoutform":break;case"layoutsubtotallocation":break;case"layoutcompa
   const SCOPE     = "https://www.googleapis.com/auth/drive.file";
 
   let driveToken = null;
+      driveUploadToken = null;
+      driveDataToken = null;
   let tokenClient = null;
   let gapiPickerLoaded = false;
   let folderId = null;
@@ -379,7 +381,7 @@ break;case"layoutform":break;case"layoutsubtotallocation":break;case"layoutcompa
     });
   }
 
-  function ensureDriveToken(){
+  function ensureDriveToken(promptMode="consent"){
     return new Promise((resolve,reject)=>{
       if (driveToken){ resolve(driveToken); return; }
       if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
@@ -389,26 +391,35 @@ break;case"layoutform":break;case"layoutsubtotallocation":break;case"layoutcompa
       if (!tokenClient){
         tokenClient = google.accounts.oauth2.initTokenClient({
           client_id: CLIENT_ID,
-          scope: SCOPE,
+          scope: DRIVE_SCOPE,
           callback: (resp)=>{
             if (resp.error){
+              // If we tried silent token fetch, tell user to click Login
+              if ((promptMode||"") === "none"){
+                setAuthStatus("Bejelentkezés szükséges a Drive művelethez. Kattints a Bejelentkezés gombra.");
+                if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezés szükséges a Drive művelethez.");
+              }
               reject(new Error(resp.error));
             } else {
               driveToken = resp.access_token;
+              // Single-login: reuse one token everywhere
+              driveUploadToken = driveToken;
+              driveDataToken = driveToken;
               setAuthStatus("Bejelentkezve Google Drive-ra.");
+              if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
               resolve(driveToken);
             }
           }
         });
       }
-      tokenClient.requestAccessToken({prompt:"consent"});
+      tokenClient.requestAccessToken({prompt: (promptMode||"consent")});
     });
   }
 
   if (loginBtn){
     loginBtn.addEventListener("click", async ()=>{
       try{
-        await ensureDriveToken();
+        await ensureDriveToken("consent");
       }catch(e){
         console.error(e);
         setAuthStatus("Hiba bejelentkezéskor: " + e.message);
@@ -1169,30 +1180,11 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
     });
   }
 
-  function ensureDriveUploadToken(promptMode){
-    return new Promise((resolve,reject)=>{
-      if(driveUploadToken){ resolve(driveUploadToken); return; }
-      if(typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
-        reject(new Error("Google Identity Services nem érhető el"));
-        return;
-      }
-      if(!driveUploadTokenClient){
-        driveUploadTokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: DRIVE_CLIENT_ID,
-          scope: DRIVE_SCOPE,
-          callback: (resp)=>{
-            if(resp && resp.error){
-              reject(new Error(resp.error));
-            }else{
-              driveUploadToken = resp.access_token;
-              setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
-              resolve(driveUploadToken);
-            }
-          }
-        });
-      }
-      // promptMode: "consent" (első alkalom), "none" (silent), vagy undefined
-      driveUploadTokenClient.requestAccessToken({ prompt: promptMode || "consent" });
+  function ensureDriveUploadToken(promptMode="none"){
+    return ensureDriveToken(promptMode).then((t)=>{
+      driveUploadToken = t;
+      if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
+      return t;
     });
   }
 
@@ -1754,57 +1746,36 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
   };
 
 
-  // ----- Google Drive adattábla betöltés (EGYSZERES bejelentkezés) -----
-  // Ugyanazt a tokent használjuk, mint a képek/Drive mentés résznél (driveUploadToken).
-  // Így elég egyszer bejelentkezni a "Bejelentkezés" gombbal.
+  // ----- Google Drive adattábla betöltés -----
+  const DRIVE_DATA_CLIENT_ID = "503405587172-v273nd0lbhke95msg1g9c2e333h9mnkf.apps.googleusercontent.com";
+  const DRIVE_DATA_API_KEY   = "AIzaSyDT2q_MlGiPwKnmF4dO_O2rQ-RG2m3PgPE";
+  const DRIVE_DATA_SCOPE     = "https://www.googleapis.com/auth/drive.readonly";
+
+  let driveDataToken = null;
+  let driveDataTokenClient = null;
+  let driveDataGapiLoaded = false;
 
   function updateDriveDataStatus(msg){
     const el = document.getElementById("driveDataStatus");
     if(el) el.textContent = msg || "";
   }
 
-  async function openDriveDataPicker(){
-    updateDriveDataStatus("Adattábla kiválasztása a Drive-ról...");
+  function ensureGapiLoadedForData(){
+    return new Promise((resolve,reject)=>{
+      if(driveDataGapiLoaded){ resolve(); return; }
+      if(typeof gapi === "undefined"){ reject(new Error("gapi nem érhető el")); return; }
+      gapi.load("client:picker", ()=>{
+        driveDataGapiLoaded = true;
+        resolve();
+      });
+    });
+  }
 
-    // Picker betöltés (ugyanaz, mint a mappa/kép választóknál)
-    await ensureDrivePicker();
-
-    // Nincs automatikus consent: ha nincs token, kérjük a usert, hogy kattintson a Bejelentkezés gombra.
-    if(!driveUploadToken){
-      updateDriveDataStatus("Előbb kattints a „Bejelentkezés” gombra.");
-      throw new Error("Nincs Drive bejelentkezés.");
-    }
-
-    const token = driveUploadToken;
-
-    const view = new google.picker.DocsView()
-      .setIncludeFolders(false)
-      .setSelectFolderEnabled(false)
-      .setMimeTypes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.google-apps.spreadsheet");
-
-    const picker = new google.picker.PickerBuilder()
-      .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_API_KEY)
-      .addView(view)
-      .setCallback(async data=>{
-        if(data.action === google.picker.Action.PICKED){
-          const doc = data.docs && data.docs[0];
-          if(!doc) return;
-          try{
-            updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
-            await downloadDriveDataFileUnified(doc);
-            updateDriveDataStatus("Adattábla beolvasva a Drive-ról: "+(doc.name||""));
-          }catch(err){
-            console.error(err);
-            updateDriveDataStatus("Hiba: "+(err.message||err));
-          }
-        }else if(data.action === google.picker.Action.CANCEL){
-          updateDriveDataStatus("Adattábla kiválasztása megszakítva.");
-        }
-      })
-      .build();
-
-    picker.setVisible(true);
+  function ensureDriveDataToken(promptMode="none"){
+    return ensureDriveToken(promptMode).then((t)=>{
+      driveDataToken = t;
+      return t;
+    });
   }
 
   async function loadDataFromBlob(blob, filename){
@@ -1813,6 +1784,7 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
       if (document.getElementById('error')) document.getElementById('error').textContent='';
       const name=(filename||'').toLowerCase();
 
+      // IDE: a Drive-ról betöltött adat menjen ugyanabba, amit a generálás használ
       if(name.endsWith('.xlsx')||name.endsWith('.xls')){
         const arr = await blob.arrayBuffer();
         const XLSXlib = window.XLSX || (typeof XLSX!=='undefined' ? XLSX : null);
@@ -1829,6 +1801,7 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
 
       headers = dataRows.length ? Object.keys(dataRows[0]) : [];
 
+      // Opcionális tükrözés, ha máshol window.*-t használ a kód
       window.dataRows = dataRows;
       window.headers  = headers;
 
@@ -1839,32 +1812,74 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
     }
   }
 
-  async function downloadDriveDataFileUnified(file){
+  async function downloadDriveDataFile(file){
     const fileId = file.id;
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
 
-    if(!driveUploadToken) throw new Error("Nincs Drive token");
+    const accessToken = driveDataToken;
+    if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
+    let fetchOptions = {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + accessToken }
+    };
+
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }else{
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
     }
 
-    const res = await fetch(url, {
-      method: "GET",
-      headers: { "Authorization": "Bearer " + driveUploadToken }
-    });
+    const res = await fetch(url, fetchOptions);
     if(!res.ok){
-      const t = await res.text().catch(()=> "");
-      throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText + (t?(" | "+t):""));
+      throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
     const blob = await res.blob();
     await loadDataFromBlob(blob, name);
   }
-const driveDataBtn = document.getElementById("driveDataBtn");
+
+  async function openDriveDataPicker(){
+    updateDriveDataStatus("Kapcsolódás Google Drive-hoz...");
+    await ensureGapiLoadedForData();
+    const token = await ensureDriveDataToken();
+    if(!token){
+      updateDriveDataStatus("Nincs jogosultság a Drive olvasásához.");
+      return;
+    }
+
+    const view = new google.picker.DocsView()
+      .setIncludeFolders(false)
+      .setSelectFolderEnabled(false)
+      .setMimeTypes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.google-apps.spreadsheet");
+
+    const picker = new google.picker.PickerBuilder()
+      .setOAuthToken(token)
+      .setDeveloperKey(DRIVE_DATA_API_KEY)
+      .addView(view)
+      .setCallback(async data=>{
+        if(data.action === google.picker.Action.PICKED){
+          const doc = data.docs && data.docs[0];
+          if(!doc) return;
+          try{
+            updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
+            await downloadDriveDataFile(doc);
+            updateDriveDataStatus("Adattábla beolvasva a Drive-ról: "+(doc.name||""));
+          }catch(err){
+            console.error(err);
+            updateDriveDataStatus("Hiba: "+err.message);
+          }
+        }else if(data.action === google.picker.Action.CANCEL){
+          updateDriveDataStatus("Adattábla kiválasztása megszakítva.");
+        }
+      })
+      .build();
+
+    picker.setVisible(true);
+  }
+
+  const driveDataBtn = document.getElementById("driveDataBtn");
   if(driveDataBtn){
     driveDataBtn.addEventListener("click", async ()=>{
       try{
