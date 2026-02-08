@@ -1461,30 +1461,30 @@ function renderImgPickerFolders(folders){
   });
 
   Array.from(imgPickerFolders.querySelectorAll(".driveRow[data-drive]")).forEach(row=>{
-    row.addEventListener("click", async ()=>{
+    row.addEventListener("click", async (e)=>{
+      e.preventDefault?.();
       const id = row.getAttribute("data-drive");
       imgPickerCurrentDriveId = id;
       imgPickerStack = [];
       await imgPickerNavigateTo(id); // Shared Drive root
     });
-
+  });
 
   Array.from(imgPickerFolders.querySelectorAll(".sharedRow[data-shared]")).forEach(row=>{
-    row.addEventListener("click", async ()=>{
+    row.addEventListener("click", async (e)=>{
+      e.preventDefault?.();
       const id = row.getAttribute("data-shared");
       const name = (row.textContent||"").replace("🤝📁","").trim() || "Megosztott mappa";
       // "Velem megosztott" mappák nem Shared Drive-ok, ezért marad user corpus.
       imgPickerCurrentDriveId = null;
-      // belépéskor a stack legyen üres és csak ezt a mappát vegyük fel
       imgPickerStack = [{id, name}];
       await imgPickerNavigateTo(id);
     });
   });
 
-  });
 }
 
-  function renderImgPickerGrid(){
+function renderImgPickerGrid(){
   if(!imgPickerGrid) return;
   const needle = (imgPickerSearch && imgPickerSearch.value || "").trim().toLowerCase();
   const filtered = needle ? imgPickerImages.filter(f=>String(f.name||"").toLowerCase().includes(needle)) : imgPickerImages;
