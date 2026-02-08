@@ -677,6 +677,25 @@ function guessImageColumns(heads){
     return keys.some(k=>n.includes(norm(k)));
   });
 }
+
+// ----- Képoszlop választás (localStorage) -----
+// A felhasználó be tudja pipálni, hogy mely oszlop(ok) legyenek képoszlop(ok).
+// Ezeket a böngészőben megőrizzük, hogy legközelebb se kelljen újra beállítani.
+const IMG_COLS_KEY = 'doksikitolto_user_img_cols_v1';
+function loadUserImgCols(){
+  try{
+    const raw = localStorage.getItem(IMG_COLS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  }catch(_){
+    return [];
+  }
+}
+function saveUserImgCols(cols){
+  try{
+    localStorage.setItem(IMG_COLS_KEY, JSON.stringify(Array.isArray(cols) ? cols : []));
+  }catch(_){ /* ignore */ }
+}
 function renderDataPreview(rows){
   const el=document.getElementById('dataPreview');
   if(!rows.length){ el.innerHTML='<div class="small">Nincs adat a táblában.</div>'; return; }
