@@ -885,7 +885,8 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
             if(!arrBuf) continue;
             ensureImageContentType(contentTypesXml, ext);
             part.relsXml = getOrCreateRelsXml(workZip, part.name, part.relsXml);
-            const newName=`media/${tag}_${occ.ordinal}.${ext}`;
+            const safeTag = String(tag||'').replace(/[^A-Za-z0-9_\-]+/g,'_').slice(0,40) || 'img';
+            const newName=`media/${safeTag}_${occ.ordinal}.${ext}`;
             setRelTarget(part.relsXml, rid, newName);
             workZip.file('word/'+newName, arrBuf);
           }
@@ -1234,6 +1235,9 @@ const imgPickerHint    = document.getElementById("imgPickerHint");
 let imgPickerCtx = { rowIndex:null, colName:null };
 let imgPickerStack = []; // [{id,name}]
 let imgPickerCurrentFolderId = "root";
+let imgPickerCurrentDriveId = null; // Shared Drive ID when browsing a shared drive
+let imgPickerDrives = []; // cached shared drives list
+
 let imgPickerImages = [];
 
 function showImgPicker(open){
@@ -1249,15 +1253,23 @@ if(imgPickerOverlay){
 }
 if(imgPickerRoot){
   imgPickerRoot.addEventListener("click", async ()=>{
+    // Back to My Drive root
+    imgPickerCurrentDriveId = null;
     imgPickerStack = [];
     await imgPickerNavigateTo("root");
   });
 }
 if(imgPickerUp){
   imgPickerUp.addEventListener("click", async ()=>{
+    // If we are at the root of a Shared Drive, go back to My Drive root
+    if(imgPickerCurrentDriveId && !imgPickerStack.length){
+      imgPickerCurrentDriveId = null;
+      await imgPickerNavigateTo("root");
+      return;
+    }
     if(!imgPickerStack.length){ await imgPickerNavigateTo("root"); return; }
     imgPickerStack.pop();
-    const parent = imgPickerStack.length ? imgPickerStack[imgPickerStack.length-1].id : "root";
+    const parent = imgPickerStack.length ? imgPickerStack[imgPickerStack.length-1].id : (imgPickerCurrentDriveId || "root");
     await imgPickerNavigateTo(parent);
   });
 }
@@ -1288,6 +1300,35 @@ async function driveApiDownload(url){
   return resp.arrayBuffer();
 }
 
+async function listSharedDrives(){
+  // Shared Drives list (if the account has access). Falls back silently if not permitted.
+  try{
+    const fields = encodeURIComponent("drives(id,name),nextPageToken");
+    let pageToken = "";
+    let out = [];
+    do{
+      const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+      const url = `https://www.googleapis.com/drive/v3/drives?pageSize=100&fields=${fields}${tokenParam}`;
+      const j = await driveApiGet(url);
+      out = out.concat(j.drives||[]);
+      pageToken = j.nextPageToken || "";
+    }while(pageToken);
+    out.sort((a,b)=>(a.name||"").localeCompare(b.name||"",'hu'));
+    return out;
+  }catch(err){
+    // Some domains/users may not have permission to list drives.
+    return [];
+  }
+}
+
+function currentDriveName(){
+  if(!imgPickerCurrentDriveId) return "My Drive";
+  const d = (imgPickerDrives||[]).find(x=>x.id===imgPickerCurrentDriveId);
+  return d ? (d.name||d.id) : "Megosztott meghajtó";
+}
+
+
+
 async function listFolders(parentId){
   const q = encodeURIComponent(`'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
   const fields = encodeURIComponent("files(id,name),nextPageToken");
@@ -1296,7 +1337,9 @@ async function listFolders(parentId){
   do{
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=200&fields=${fields}${tokenParam}&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-    const j = await driveApiGet(url);
+    const corpora = imgPickerCurrentDriveId ? `&corpora=drive&driveId=${encodeURIComponent(imgPickerCurrentDriveId)}` : ``;
+    const url2 = url + corpora;
+    const j = await driveApiGet(url2);
     out = out.concat(j.files||[]);
     pageToken = j.nextPageToken || "";
   }while(pageToken);
@@ -1312,7 +1355,9 @@ async function listImages(parentId){
   do{
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=200&fields=${fields}${tokenParam}&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-    const j = await driveApiGet(url);
+    const corpora = imgPickerCurrentDriveId ? `&corpora=drive&driveId=${encodeURIComponent(imgPickerCurrentDriveId)}` : ``;
+    const url2 = url + corpora;
+    const j = await driveApiGet(url2);
     out = out.concat(j.files||[]);
     pageToken = j.nextPageToken || "";
   }while(pageToken);
@@ -1322,7 +1367,8 @@ async function listImages(parentId){
 
 function renderImgPickerCrumb(){
   if(!imgPickerCrumb) return;
-  const parts = [{id:"root", name:"Root"}].concat(imgPickerStack);
+  const base = imgPickerCurrentDriveId ? {id: imgPickerCurrentDriveId, name: currentDriveName()} : {id:"root", name:"My Drive"};
+  const parts = [base].concat(imgPickerStack);
   imgPickerCrumb.innerHTML = parts.map((p,idx)=>{
     const isLast = idx===parts.length-1;
     if(isLast) return `<span>${escapeHtml(p.name||p.id)}</span>`;
@@ -1334,7 +1380,7 @@ function renderImgPickerCrumb(){
       const idx = parseInt(a.getAttribute("data-crumb"),10);
       if(idx<=0){
         imgPickerStack = [];
-        await imgPickerNavigateTo("root");
+        await imgPickerNavigateTo(imgPickerCurrentDriveId || "root");
       }else{
         imgPickerStack = imgPickerStack.slice(0, idx); // keep first idx entries of stack
         const folder = imgPickerStack[idx-1];
@@ -1347,22 +1393,45 @@ function renderImgPickerCrumb(){
 
 function renderImgPickerFolders(folders){
   if(!imgPickerFolders) return;
-  if(!folders.length){
-    imgPickerFolders.innerHTML = '<div class="small" style="color:var(--muted)">Nincs almappa.</div>';
-    return;
-  }
-  imgPickerFolders.innerHTML = folders.map(f=>(
+
+  const isMyDriveRoot = (!imgPickerCurrentDriveId && imgPickerCurrentFolderId==="root" && !imgPickerStack.length);
+
+  const drives = (isMyDriveRoot ? (imgPickerDrives||[]) : []);
+  const driveHtml = drives.length ? (
+    `<div class="small" style="margin:4px 0 6px;color:var(--muted)">Megosztott meghajtók</div>` +
+    drives.map(d=>(
+      `<div class="driveRow folderRow" data-drive="${d.id}" title="${escapeHtml(d.id)}">
+         <div>🗄️ ${escapeHtml(d.name||"(névtelen meghajtó)")}</div>
+         <div class="small" style="opacity:.8">Megnyit</div>
+       </div>`
+    )).join("") +
+    `<div class="small" style="margin:10px 0 6px;color:var(--muted)">Mappák (My Drive)</div>`
+  ) : (isMyDriveRoot ? `<div class="small" style="margin:4px 0 6px;color:var(--muted)">Mappák (My Drive)</div>` : "");
+
+  const folderHtml = (folders && folders.length) ? folders.map(f=>(
     `<div class="folderRow" data-folder="${f.id}" title="${escapeHtml(f.id)}">
        <div>📁 ${escapeHtml(f.name||"(névtelen)")}</div>
        <div class="small" style="opacity:.8">Megnyit</div>
      </div>`
-  )).join("");
+  )).join("") : `<div class="small" style="color:var(--muted)">Nincs almappa.</div>`;
+
+  imgPickerFolders.innerHTML = driveHtml + folderHtml;
+
   Array.from(imgPickerFolders.querySelectorAll(".folderRow[data-folder]")).forEach(row=>{
     row.addEventListener("click", async ()=>{
       const id = row.getAttribute("data-folder");
       const name = (row.textContent||"").replace("📁","").trim() || "Mappa";
       imgPickerStack.push({id, name});
       await imgPickerNavigateTo(id);
+    });
+  });
+
+  Array.from(imgPickerFolders.querySelectorAll(".driveRow[data-drive]")).forEach(row=>{
+    row.addEventListener("click", async ()=>{
+      const id = row.getAttribute("data-drive");
+      imgPickerCurrentDriveId = id;
+      imgPickerStack = [];
+      await imgPickerNavigateTo(id); // Shared Drive root
     });
   });
 }
@@ -1397,7 +1466,13 @@ function renderImgPickerGrid(){
 }
 
 async function imgPickerNavigateTo(folderId){
+  // If browsing a Shared Drive and asked for root, use the drive root
+  if(imgPickerCurrentDriveId && (!folderId || folderId==="root")) folderId = imgPickerCurrentDriveId;
   imgPickerCurrentFolderId = folderId || "root";
+  // Load Shared Drives list when we are at My Drive root
+  if(!imgPickerCurrentDriveId && imgPickerCurrentFolderId==="root" && !imgPickerStack.length){
+    imgPickerDrives = await listSharedDrives();
+  }
   if(imgPickerHint){
     const col = imgPickerCtx && imgPickerCtx.colName ? ` • oszlop: ${imgPickerCtx.colName}` : "";
     imgPickerHint.textContent = `Válassz mappát, majd kattints egy képre.${col}`;
