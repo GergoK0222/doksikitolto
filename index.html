@@ -349,8 +349,6 @@ break;case"layoutform":break;case"layoutsubtotallocation":break;case"layoutcompa
   const SCOPE     = "https://www.googleapis.com/auth/drive.file";
 
   let driveToken = null;
-      driveUploadToken = null;
-      driveDataToken = null;
   let tokenClient = null;
   let gapiPickerLoaded = false;
   let folderId = null;
@@ -381,45 +379,52 @@ break;case"layoutform":break;case"layoutsubtotallocation":break;case"layoutcompa
     });
   }
 
-  function ensureDriveToken(promptMode="consent"){
-    return new Promise((resolve,reject)=>{
-      if (driveToken){ resolve(driveToken); return; }
-      if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
-        reject(new Error("Google Identity Services nem érhető el"));
-        return;
-      }
-      if (!tokenClient){
-        tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: CLIENT_ID,
-          scope: DRIVE_SCOPE,
-          callback: (resp)=>{
-            if (resp.error){
-              // If we tried silent token fetch, tell user to click Login
-              if ((promptMode||"") === "none"){
-                setAuthStatus("Bejelentkezés szükséges a Drive művelethez. Kattints a Bejelentkezés gombra.");
-                if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezés szükséges a Drive művelethez.");
-              }
-              reject(new Error(resp.error));
-            } else {
-              driveToken = resp.access_token;
-              // Single-login: reuse one token everywhere
-              driveUploadToken = driveToken;
-              driveDataToken = driveToken;
-              setAuthStatus("Bejelentkezve Google Drive-ra.");
-              if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
-              resolve(driveToken);
-            }
+  // EGYSÉGES Drive token (single login)
+function ensureDriveToken(promptMode){
+  return new Promise((resolve,reject)=>{
+    // Kompatibilitás: több helyen külön token változókat használ a kód.
+    if (driveToken){
+      try{ driveUploadToken = driveToken; }catch(_){}
+      try{ driveDataToken = driveToken; }catch(_){}
+      resolve(driveToken);
+      return;
+    }
+    if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
+      reject(new Error("Google Identity Services nem érhető el"));
+      return;
+    }
+    if (!tokenClient){
+      // A legszélesebb, itt használt scope-ok: olvasás + file + meta
+      const unifiedScope = (typeof DRIVE_SCOPE !== "undefined" ? DRIVE_SCOPE : (typeof SCOPE !== "undefined" ? SCOPE : ""));
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: unifiedScope,
+        callback: (resp)=>{
+          if (resp && resp.error){
+            reject(new Error(resp.error));
+          } else if (resp && resp.access_token){
+            driveToken = resp.access_token;
+            try{ driveUploadToken = driveToken; }catch(_){}
+            try{ driveDataToken = driveToken; }catch(_){}
+            if (typeof setAuthStatus === "function") setAuthStatus("Bejelentkezve Google Drive-ra.");
+            if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
+            resolve(driveToken);
+          } else {
+            reject(new Error("Nincs access_token válaszban"));
           }
-        });
-      }
-      tokenClient.requestAccessToken({prompt: (promptMode||"consent")});
-    });
-  }
+        }
+      });
+    }
+    // promptMode: "consent" (első), "none" (silent), vagy undefined -> alapértelmezett consent
+    tokenClient.requestAccessToken({ prompt: promptMode || "consent" });
+  });
+
+
 
   if (loginBtn){
     loginBtn.addEventListener("click", async ()=>{
       try{
-        await ensureDriveToken("consent");
+        await ensureDriveToken();
       }catch(e){
         console.error(e);
         setAuthStatus("Hiba bejelentkezéskor: " + e.message);
@@ -1180,13 +1185,11 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
     });
   }
 
-  function ensureDriveUploadToken(promptMode="none"){
-    return ensureDriveToken(promptMode).then((t)=>{
-      driveUploadToken = t;
-      if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
-      return t;
-    });
-  }
+  function ensureDriveUploadToken(promptMode){
+  // Single login: ugyanazt a tokent használjuk minden Drive művelethez
+  return ensureDriveToken(promptMode);
+
+
 
   if(driveLoginBtn){
     driveLoginBtn.addEventListener("click", async (e)=>{
@@ -1771,12 +1774,11 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
     });
   }
 
-  function ensureDriveDataToken(promptMode="none"){
-    return ensureDriveToken(promptMode).then((t)=>{
-      driveDataToken = t;
-      return t;
-    });
-  }
+  function ensureDriveDataToken(){
+  // Single login: ugyanazt a tokent használjuk minden Drive művelethez
+  return ensureDriveToken("none").catch(()=>ensureDriveToken("consent"));
+
+
 
   async function loadDataFromBlob(blob, filename){
     if(!blob) return;
