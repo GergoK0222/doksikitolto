@@ -379,47 +379,31 @@ break;case"layoutform":break;case"layoutsubtotallocation":break;case"layoutcompa
     });
   }
 
-  // EGYSÉGES Drive token (single login)
-function ensureDriveToken(promptMode){
-  return new Promise((resolve,reject)=>{
-    // Kompatibilitás: több helyen külön token változókat használ a kód.
-    if (driveToken){
-      try{ driveUploadToken = driveToken; }catch(_){}
-      try{ driveDataToken = driveToken; }catch(_){}
-      resolve(driveToken);
-      return;
-    }
-    if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
-      reject(new Error("Google Identity Services nem érhető el"));
-      return;
-    }
-    if (!tokenClient){
-      // A legszélesebb, itt használt scope-ok: olvasás + file + meta
-      const unifiedScope = (typeof DRIVE_SCOPE !== "undefined" ? DRIVE_SCOPE : (typeof SCOPE !== "undefined" ? SCOPE : ""));
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: unifiedScope,
-        callback: (resp)=>{
-          if (resp && resp.error){
-            reject(new Error(resp.error));
-          } else if (resp && resp.access_token){
-            driveToken = resp.access_token;
-            try{ driveUploadToken = driveToken; }catch(_){}
-            try{ driveDataToken = driveToken; }catch(_){}
-            if (typeof setAuthStatus === "function") setAuthStatus("Bejelentkezve Google Drive-ra.");
-            if (typeof setDriveAuthStatus === "function") setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
-            resolve(driveToken);
-          } else {
-            reject(new Error("Nincs access_token válaszban"));
+  function ensureDriveToken(){
+    return new Promise((resolve,reject)=>{
+      if (driveToken){ resolve(driveToken); return; }
+      if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
+        reject(new Error("Google Identity Services nem érhető el"));
+        return;
+      }
+      if (!tokenClient){
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPE,
+          callback: (resp)=>{
+            if (resp.error){
+              reject(new Error(resp.error));
+            } else {
+              driveToken = resp.access_token;
+              setAuthStatus("Bejelentkezve Google Drive-ra.");
+              resolve(driveToken);
+            }
           }
-        }
-      });
-    }
-    // promptMode: "consent" (első), "none" (silent), vagy undefined -> alapértelmezett consent
-    tokenClient.requestAccessToken({ prompt: promptMode || "consent" });
-  });
-
-
+        });
+      }
+      tokenClient.requestAccessToken({prompt:"consent"});
+    });
+  }
 
   if (loginBtn){
     loginBtn.addEventListener("click", async ()=>{
@@ -1186,10 +1170,31 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
   }
 
   function ensureDriveUploadToken(promptMode){
-  // Single login: ugyanazt a tokent használjuk minden Drive művelethez
-  return ensureDriveToken(promptMode);
-
-
+    return new Promise((resolve,reject)=>{
+      if(driveUploadToken){ resolve(driveUploadToken); return; }
+      if(typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
+        reject(new Error("Google Identity Services nem érhető el"));
+        return;
+      }
+      if(!driveUploadTokenClient){
+        driveUploadTokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: DRIVE_CLIENT_ID,
+          scope: DRIVE_SCOPE,
+          callback: (resp)=>{
+            if(resp && resp.error){
+              reject(new Error(resp.error));
+            }else{
+              driveUploadToken = resp.access_token;
+              setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
+              resolve(driveUploadToken);
+            }
+          }
+        });
+      }
+      // promptMode: "consent" (első alkalom), "none" (silent), vagy undefined
+      driveUploadTokenClient.requestAccessToken({ prompt: promptMode || "consent" });
+    });
+  }
 
   if(driveLoginBtn){
     driveLoginBtn.addEventListener("click", async (e)=>{
@@ -1775,10 +1780,32 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
   }
 
   function ensureDriveDataToken(){
-  // Single login: ugyanazt a tokent használjuk minden Drive művelethez
-  return ensureDriveToken("none").catch(()=>ensureDriveToken("consent"));
-
-
+    return new Promise((resolve,reject)=>{
+      if(driveDataToken){
+        resolve(driveDataToken);
+        return;
+      }
+      if(typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
+        reject(new Error("Google Identity Services nem érhető el"));
+        return;
+      }
+      if(!driveDataTokenClient){
+        driveDataTokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: DRIVE_DATA_CLIENT_ID,
+          scope: DRIVE_DATA_SCOPE,
+          callback: (resp)=>{
+            if(resp.error){
+              reject(new Error(resp.error));
+            }else{
+              driveDataToken = resp.access_token;
+              resolve(driveDataToken);
+            }
+          }
+        });
+      }
+      driveDataTokenClient.requestAccessToken({prompt:"consent"});
+    });
+  }
 
   async function loadDataFromBlob(blob, filename){
     if(!blob) return;
