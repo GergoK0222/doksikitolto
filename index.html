@@ -946,6 +946,114 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
     return await ensureDriveUploadToken(false);
   }
 
+
+// --- Drive képcsere (adat-táblában) ---
+// A Data Preview-ben lévő "Válassz képet (Drive)" gomb ehhez a függvényhez hív.
+// Nem indítunk bejelentkezést: ha nincs token, csak üzenetet írunk.
+window.openImagePickerForCell = async function openImagePickerForCell(rowIndex, colName){
+  try{
+    await ensureGapiLoadedForData();
+    const token = await ensureDriveUploadToken(false);
+    if(!token){
+      log("Drive képválasztó: előbb jelentkezz be a Drive-hoz (felső gomb).","warn");
+      return;
+    }
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setIncludeFolders(false)
+      .setSelectFolderEnabled(false)
+      .setMimeTypes("image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/svg+xml,application/vnd.google-apps.drawing");
+
+    const picker = new google.picker.PickerBuilder()
+      .setOAuthToken(token)
+      .setDeveloperKey(DRIVE_API_KEY)
+      .addView(view)
+      .setCallback((data)=>{
+        if(data.action === google.picker.Action.PICKED){
+          const doc = data.docs && data.docs[0];
+          if(!doc) return;
+
+          // A cellába Drive ref kerül, amit később a generálás fetch-el.
+          const ref = "drive:" + doc.id;
+          if(Array.isArray(window.dataRows) && window.dataRows[rowIndex]){
+            window.dataRows[rowIndex][colName] = ref;
+            // tükrözzük a belső változókat is, ha vannak
+            try{ if(typeof dataRows!=="undefined" && dataRows[rowIndex]) dataRows[rowIndex][colName]=ref; }catch(_){}
+            renderDataPreview(window.dataRows);
+            log(`Drive kép kiválasztva: ${doc.name || doc.id} → ${colName} (sor ${rowIndex+1})`,"ok");
+          }else{
+            log("Nem találom a táblázat sorait (dataRows).","warn");
+          }
+        }
+      })
+      .build();
+
+    picker.setVisible(true);
+  }catch(err){
+    console.error(err);
+    log("Drive képválasztó hiba: " + (err && err.message ? err.message : err), "err");
+  }
+};
+
+// A generálás közben a 'drive:<fileId>' referenciát ezzel töltjük le.
+// Képfájloknál alt=media, Google Drawing-nál export PNG.
+window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
+  const token = driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
+  if(!token) throw new Error("Nincs Drive hozzáférési token (jelentkezz be felül).");
+  const m = String(ref||"").trim().match(/^drive:(.+)$/i);
+  if(!m) throw new Error("Érvénytelen Drive ref: " + ref);
+  const fileId = m[1].trim();
+
+  // meta (mimeType + name)
+  let meta = null;
+  try{
+    const metaResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=name,mimeType`,{
+      headers:{ Authorization: "Bearer " + token }
+    });
+    if(metaResp.ok) meta = await metaResp.json();
+  }catch(_){}
+
+  const mime = (meta && meta.mimeType) ? meta.mimeType : "";
+  const name = (meta && meta.name) ? meta.name : fileId;
+
+  const mimeToExt = (mimeType)=>{
+    const map = {
+      "image/png":"png",
+      "image/jpeg":"jpg",
+      "image/gif":"gif",
+      "image/bmp":"bmp",
+      "image/tiff":"tiff",
+      "image/svg+xml":"svg"
+    };
+    return map[(mimeType||"").toLowerCase()] || "";
+  };
+
+  // Google Drawing export
+  if(mime === "application/vnd.google-apps.drawing"){
+    const exp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=image/png`,{
+      headers:{ Authorization: "Bearer " + token }
+    });
+    if(!exp.ok) throw new Error("Drive export hiba: " + exp.status);
+    const buf = await exp.arrayBuffer();
+    return { buf, ext: "png", name };
+  }
+
+  // normál kép: alt=media
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,{
+    headers:{ Authorization: "Bearer " + token }
+  });
+  if(!dl.ok) throw new Error("Drive letöltés hiba: " + dl.status);
+
+  const buf = await dl.arrayBuffer();
+  let ext = mimeToExt(mime);
+  if(!ext){
+    // név alapján
+    const m2 = String(name).toLowerCase().match(/\.([a-z0-9]+)$/);
+    ext = m2 ? m2[1] : "png";
+  }
+  return { buf, ext, name };
+};
+
+
   async function driveSignIn(){
     setDriveAuthStatus("Bejelentkezés folyamatban...");
     await ensureDriveTokenClient();
