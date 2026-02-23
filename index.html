@@ -117,7 +117,11 @@ th{background:#0f1830}
     <div style="font-weight:700">Word sablon kitöltő – OFFLINE egyfájlos</div>
     <div class="small">Beépített: PizZip, PizZipUtils, FileSaver, XLSX • XLSX/CSV • Képek URL/ZIP • Fejléc/Lábléc SDT • VML</div>
   </div>
-  <div style="margin-left:auto" class="small">Build: most</div>
+  <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+    <button type="button" class="btn" id="driveLoginBtn">Drive bejelentkezés</button>
+    <div class="small" id="driveAuthStatus">Nincs bejelentkezve.</div>
+    <div class="small">Build: most</div>
+  </div>
 </header>
 <nav class="topnav">
   <button class="nav-btn nav-btn-active" data-target="screen-main">Sablon kitöltése</button>
@@ -137,21 +141,18 @@ th{background:#0f1830}
     <div class="row">
       <label><b>Google Drive</b></label>
       <div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
-          <button type="button" class="btn" id="driveLoginBtn">Bejelentkezés</button>
-          <button type="button" class="btn" id="driveLogoutBtn">Kijelentkezés</button>
-          <label class="small" style="display:flex;align-items:center;gap:4px;">
-            <input type="checkbox" id="driveAlsoSave" />
-            Mentés Google Drive-ra is
-          </label>
-        </div>
+        <label class="small" style="display:flex;align-items:center;gap:4px;margin-bottom:6px;">
+          <input type="checkbox" id="driveAlsoSave" />
+          Mentés Google Drive-ra is
+        </label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:4px;">
           <button type="button" class="btn" id="driveFolderBtn">Drive mappa kiválasztása</button>
           <span id="driveFolderStatus" class="small">Nincs kiválasztott Drive mappa.</span>
         </div>
-        <div id="driveAuthStatus" class="small"></div>
+        <div class="small" style="color:var(--muted)">Bejelentkezés felül a fejlécben.</div>
       </div>
     </div>
+
     <div class="row"><label><b>Diagnosztika</b></label><div id="diag" class="small"></div></div>
     <div class="row"><label><b>Napló</b></label><div id="log"></div></div>
     <div id="error" class="small err"></div>
@@ -1158,8 +1159,8 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
   let driveFolderId = null;
 
   const driveLoginBtn = document.getElementById("driveLoginBtn");
-  const driveLogoutBtn = document.getElementById("driveLogoutBtn");
-  const driveFolderBtn = document.getElementById("driveFolderBtn");
+  const driveLogoutBtn = null;
+const driveFolderBtn = document.getElementById("driveFolderBtn");
   const driveAlsoSave = document.getElementById("driveAlsoSave");
   const driveAuthStatus = document.getElementById("driveAuthStatus");
   const driveFolderStatus = document.getElementById("driveFolderStatus");
@@ -1194,6 +1195,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
               reject(new Error(resp.error));
             }else{
               driveUploadToken = resp.access_token;
+              try{ driveDataToken = driveUploadToken; }catch(_){ }
               setDriveAuthStatus("Bejelentkezve Google Drive-ra.");
               resolve(driveUploadToken);
             }
@@ -1214,17 +1216,6 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
         console.error(err);
         setDriveAuthStatus("Hiba bejelentkezéskor: " + (err.message||err));
       }
-    });
-  }
-
-  if(driveLogoutBtn){
-    driveLogoutBtn.addEventListener("click", (e)=>{
-      e.preventDefault();
-      driveUploadToken = null;
-      driveFolderId = null;
-      if(driveAlsoSave) driveAlsoSave.checked = false;
-      setDriveAuthStatus("Nincs bejelentkezve.");
-      setDriveFolderStatus("Nincs kiválasztott Drive mappa.");
     });
   }
 
@@ -1286,24 +1277,22 @@ if(imgPickerUp){
 if(imgPickerSearch){ imgPickerSearch.addEventListener("input", ()=>renderImgPickerGrid()); }
 
 async function driveApiGet(url){
-  if(!driveUploadToken){
-    try{ await ensureDriveUploadToken("none"); }
-    catch{ await ensureDriveUploadToken("consent"); }
-  }
+  if(!driveUploadToken) throw new Error("Nincs Drive bejelentkezés. Jelentkezz be felül.");
   const resp = await fetch(url, { headers: { "Authorization":"Bearer "+driveUploadToken }});
-  if(!resp.ok){
+  
+  if(resp.status===401||resp.status===403){ driveUploadToken=null; setDriveAuthStatus("Lejárt a Drive bejelentkezés. Jelentkezz be újra felül."); throw new Error("Drive jogosultság lejárt (401/403)."); }
+if(!resp.ok){
     const t = await resp.text().catch(()=> "");
     throw new Error("Drive API hiba: "+resp.status+" "+t);
   }
   return resp.json();
 }
 async function driveApiDownload(url){
-  if(!driveUploadToken){
-    try{ await ensureDriveUploadToken("none"); }
-    catch{ await ensureDriveUploadToken("consent"); }
-  }
+  if(!driveUploadToken) throw new Error("Nincs Drive bejelentkezés. Jelentkezz be felül.");
   const resp = await fetch(url, { headers: { "Authorization":"Bearer "+driveUploadToken }});
-  if(!resp.ok){
+  
+  if(resp.status===401||resp.status===403){ driveUploadToken=null; setDriveAuthStatus("Lejárt a Drive bejelentkezés. Jelentkezz be újra felül."); throw new Error("Drive jogosultság lejárt (401/403)."); }
+if(!resp.ok){
     const t = await resp.text().catch(()=> "");
     throw new Error("Drive letöltési hiba: "+resp.status+" "+t);
   }
@@ -1582,8 +1571,7 @@ window.openImagePickerForCell = async function(rowIndex, colName){
   imgPickerCtx = { rowIndex, colName };
   if(!driveUploadToken){
     setDriveAuthStatus("Képválasztóhoz előbb be kell jelentkezni Drive-ra.");
-    try{ await ensureDriveUploadToken("consent"); }
-    catch(err){ setDriveAuthStatus("Hiba bejelentkezéskor: "+(err.message||err)); return; }
+    return;
   }
   const startId = driveFolderId || "root";
   imgPickerStack = startId==="root" ? [] : [{id:startId, name:"Kiválasztott mappa"}];
@@ -1708,11 +1696,7 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
       if(!driveAlsoSave || !driveAlsoSave.checked) return;
       if(!blob || !outName) return;
 
-      // token lehet lejárt – kérünk újat (silent), ha nem megy, consenttel.
-      if(!driveUploadToken){
-        try{ await ensureDriveUploadToken("none"); }
-        catch{ await ensureDriveUploadToken("consent"); }
-      }
+      if(!driveUploadToken){ setDriveAuthStatus("Drive feltöltés kihagyva: jelentkezz be felül."); return; }
       if(!driveFolderId){
         setDriveFolderStatus("Nincs kiválasztott Drive mappa, feltöltés kihagyva.");
         return;
@@ -1794,12 +1778,13 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
   }
 
   function ensureDriveDataToken(){
-    return new Promise((resolve,reject)=>{
-      if(driveDataToken){
-        resolve(driveDataToken);
-        return;
-      }
-      if(typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
+    return new Promise((resolve)=>{
+      // Egységes Drive token: a fejlécben lévő bejelentkezés gomb állítja be.
+      resolve(driveUploadToken || null);
+    });
+  }
+
+  if(typeof google === "undefined" || !google.accounts || !google.accounts.oauth2){
         reject(new Error("Google Identity Services nem érhető el"));
         return;
       }
