@@ -997,7 +997,19 @@ const driveFolderBtn = document.getElementById("driveFolderBtn");
   const driveAuthStatus = document.getElementById("driveAuthStatus");
   const driveFolderStatus = document.getElementById("driveFolderStatus");
 
-  function setDriveAuthStatus(msg){ if(driveAuthStatus) driveAuthStatus.textContent = msg || ""; }
+  
+  // státusz mezők a Drive-ból betöltésekhez
+  const driveDataStatusEl = document.getElementById("driveDataStatus");
+  const driveTemplateStatusEl = document.getElementById("driveTemplateStatus");
+
+  function updateDriveDataStatus(msg){
+    if(driveDataStatusEl) driveDataStatusEl.textContent = msg || "";
+  }
+  function updateDriveTemplateStatus(msg){
+    if(driveTemplateStatusEl) driveTemplateStatusEl.textContent = msg || "";
+  }
+
+function setDriveAuthStatus(msg){ if(driveAuthStatus) driveAuthStatus.textContent = msg || ""; }
   function setDriveFolderStatus(msg){ if(driveFolderStatus) driveFolderStatus.textContent = msg || ""; }
 
   
