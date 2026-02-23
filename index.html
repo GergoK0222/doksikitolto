@@ -1191,7 +1191,7 @@ async function loadDataFromBlob(blob, filename){
 
     const picker = new google.picker.PickerBuilder()
       .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_DATA_API_KEY)
+      .setDeveloperKey(DRIVE_API_KEY)
       .addView(view)
       .setCallback(async data=>{
         if(data.action === google.picker.Action.PICKED){
@@ -1230,7 +1230,7 @@ async function loadDataFromBlob(blob, filename){
 
     const picker = new google.picker.PickerBuilder()
       .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_DATA_API_KEY)
+      .setDeveloperKey(DRIVE_API_KEY)
       .addView(view)
       .setCallback(async data=>{
         if(data.action === google.picker.Action.PICKED){
