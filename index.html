@@ -915,6 +915,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
   const DRIVE_SCOPE     = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly";
 
   let driveUploadToken = null;
+  let driveAccessToken = null; // egységes hozzáférési token (login gomb állítja)
   let driveUploadTokenClient = null;
   let drivePickerLoaded = false;
   let driveFolderId = null;
