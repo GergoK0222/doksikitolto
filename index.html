@@ -127,7 +127,8 @@ th{background:#0f1830}
 
 <main id="screen-main">
   <section class="panel">
-    <div class="row"><label><b>.docx sablon</b></label><input id="docInput" type="file" accept=".docx" /></div>
+	    <div class="row"><label><b>.docx sablon</b></label><input id="docInput" type="file" accept=".docx" /></div>
+	    <div class="row"><label></label><button type="button" class="btn" id="driveTemplateBtn">Sablon betöltése Google Drive-ról</button><div id="driveTemplateStatus" class="small"></div></div>
     <div class="row"><label><b>Adattábla</b></label><input id="dataInput" type="file" accept=".xlsx,.xls,.csv" /></div>
     <div class="row"><label></label><button type="button" class="btn" id="driveDataBtn">Adattábla betöltése Google Drive-ról</button><div id="driveDataStatus" class="small"></div></div>
     <div class="row"><label><b>Képcsomag (ZIP)</b></label><input id="imgZipInput" type="file" accept=".zip" /></div>
@@ -647,15 +648,23 @@ function findSdtByTagOrdinal(partXml, tag, ordinal){
   return null;
 }
 
+// Egységes sablon-betöltés (helyi fájl + Drive ugyanide fut)
+async function loadTemplateFromArrayBuffer(arr, filename){
+  if(!arr) return;
+  document.getElementById('error').textContent='';
+  const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(arr);
+  templateArrayBuffer=arr; templateName=filename||'template.docx'; currentTemplate={parts,contentTypesXml,map};
+  const tagNames=Object.keys(map);
+  document.getElementById('docName').textContent=templateName+` – TAG-ek: ${tagNames.length}`;
+  document.getElementById('tags').innerHTML='Talált TAG-ek: '+tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${map[t].length}</span></span>`).join(' ');
+  buildMapper();
+}
+
 document.getElementById('docInput').addEventListener('change', async e=>{
   const f=e.target.files&&e.target.files[0]; if(!f) return;
   try{
-    document.getElementById('error').textContent=''; const arr=await readAsArrayBuffer(f);
-    const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(arr);
-    templateArrayBuffer=arr; templateName=f.name; currentTemplate={parts,contentTypesXml,map};
-    const tagNames=Object.keys(map); document.getElementById('docName').textContent=templateName+` – TAG-ek: ${tagNames.length}`;
-    document.getElementById('tags').innerHTML='Talált TAG-ek: '+tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${map[t].length}</span></span>`).join(' ');
-    buildMapper();
+    const arr=await readAsArrayBuffer(f);
+    await loadTemplateFromArrayBuffer(arr, f.name);
   }catch(err){ showError(err); }
 });
 
@@ -1768,6 +1777,11 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
     if(el) el.textContent = msg || "";
   }
 
+  function updateDriveTemplateStatus(msg){
+    const el = document.getElementById("driveTemplateStatus");
+    if(el) el.textContent = msg || "";
+  }
+
   function ensureGapiLoadedForData(){
     return new Promise((resolve,reject)=>{
       if(driveDataGapiLoaded){ resolve(); return; }
@@ -1869,6 +1883,81 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
     await loadDataFromBlob(blob, name);
   }
 
+  // ----- Google Drive sablon (.docx) betöltés -----
+  async function loadTemplateFromBlob(blob, filename){
+    if(!blob) return;
+    const arr = await blob.arrayBuffer();
+    await loadTemplateFromArrayBuffer(arr, filename || 'template.docx');
+  }
+
+  async function downloadDriveTemplateFile(file){
+    const fileId = file.id;
+    const name = file.name || "drive_template.docx";
+    const mimeType = file.mimeType || "";
+
+    const accessToken = driveDataToken;
+    if(!accessToken) throw new Error("Nincs Drive token");
+
+    let url;
+    const fetchOptions = {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + accessToken }
+    };
+
+    // Google Docs -> export docx
+    if(mimeType === "application/vnd.google-apps.document"){
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    }else{
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+    }
+
+    const res = await fetch(url, fetchOptions);
+    if(!res.ok){
+      throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+    }
+    const blob = await res.blob();
+    await loadTemplateFromBlob(blob, name);
+  }
+
+  async function openDriveTemplatePicker(){
+    updateDriveTemplateStatus("Kapcsolódás Google Drive-hoz...");
+    await ensureGapiLoadedForData();
+    const token = await ensureDriveDataToken();
+    if(!token){
+      updateDriveTemplateStatus("Nincs jogosultság a Drive olvasásához.");
+      return;
+    }
+
+    const view = new google.picker.DocsView()
+      .setIncludeFolders(false)
+      .setSelectFolderEnabled(false)
+      .setMimeTypes("application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.google-apps.document");
+
+    const picker = new google.picker.PickerBuilder()
+      .setOAuthToken(token)
+      .setDeveloperKey(DRIVE_DATA_API_KEY)
+      .addView(view)
+      .setCallback(async data=>{
+        if(data.action === google.picker.Action.PICKED){
+          const doc = data.docs && data.docs[0];
+          if(!doc) return;
+          try{
+            updateDriveTemplateStatus("Sablon letöltése a Drive-ról...");
+            await downloadDriveTemplateFile(doc);
+            updateDriveTemplateStatus("Sablon betöltve Drive-ról: "+(doc.name||""));
+          }catch(err){
+            console.error(err);
+            updateDriveTemplateStatus("Hiba: "+(err && err.message ? err.message : err));
+          }
+        }else if(data.action === google.picker.Action.CANCEL){
+          updateDriveTemplateStatus("Sablon kiválasztása megszakítva.");
+        }
+      })
+      .build();
+
+    picker.setVisible(true);
+  }
+
   async function openDriveDataPicker(){
     updateDriveDataStatus("Kapcsolódás Google Drive-hoz...");
     await ensureGapiLoadedForData();
@@ -1919,6 +2008,18 @@ window.fetchImageFromDriveRef = fetchImageFromDriveRef;
       }
     });
   }
+
+	  const driveTemplateBtn = document.getElementById("driveTemplateBtn");
+	  if(driveTemplateBtn){
+	    driveTemplateBtn.addEventListener("click", async ()=>{
+	      try{
+	        await openDriveTemplatePicker();
+	      }catch(err){
+	        console.error(err);
+	        updateDriveTemplateStatus("Hiba: "+(err && err.message ? err.message : err));
+	      }
+	    });
+	  }
 })();
 </script>
 
