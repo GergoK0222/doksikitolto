@@ -998,22 +998,31 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
   }
 
   function openDrivePicker({ title, view, token, onPicked, onCancel }){
-    const picker = new google.picker.PickerBuilder()
+    const pickerBuilder = new google.picker.PickerBuilder()
       .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
       .enableFeature(google.picker.Feature.SUPPORT_TEAM_DRIVES)
       .setOAuthToken(token)
       .setDeveloperKey(DRIVE_API_KEY)
       .setTitle(title || "Google Drive")
-      .addView(view)
+      .setOrigin((location && location.origin && location.origin !== "null") ? location.origin : undefined)
       .setCallback((data)=>{
-        if(data.action === google.picker.Action.PICKED){
+        try{ log("Drive picker esemény: " + (data && data.action ? data.action : ""), "small"); }catch(_){}
+        const act = (data && data.action) ? String(data.action) : "";
+        const picked = (act === "picked") || (google.picker && google.picker.Action && data.action === google.picker.Action.PICKED);
+        const canceled = (act === "cancel") || (google.picker && google.picker.Action && data.action === google.picker.Action.CANCEL);
+        if(picked){
           const doc = data.docs && data.docs[0];
           if(doc) onPicked && onPicked(doc);
-        }else if(data.action === google.picker.Action.CANCEL){
+        }else if(canceled){
           onCancel && onCancel();
         }
-      })
-      .build();
+      });
+
+    (Array.isArray(view) ? view : [view]).forEach(v=>{
+      if(v) pickerBuilder.addView(v);
+    });
+
+    const picker = pickerBuilder.build();
     picker.setVisible(true);
   }
 
@@ -1023,6 +1032,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 window.openImagePickerForCell = async function openImagePickerForCell(rowIndex, colName){
   try{
     await ensureGapiLoadedForData();
+    await ensureDrivePicker();
     const token = await ensureDriveUploadToken(false);
     if(!token){
       log("Drive képválasztó: előbb jelentkezz be a Drive-hoz (felső gomb).","warn");
@@ -1136,6 +1146,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
     async function openDriveFolderPicker(){
     setDriveFolderStatus("Drive mappa választó megnyitása...");
     await ensureGapiLoadedForData();
+    await ensureDrivePicker();
     const token = await ensureDriveDataToken();
     if(!token){
       setDriveFolderStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
@@ -1151,9 +1162,20 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
       ownedByMe: false
     });
 
+    // plusz nézet: Megosztva velem (mappák)
+    let sharedView = null;
+    try{
+      sharedView = new google.picker.DocsView(google.picker.ViewId.DOCS_SHARED_WITH_ME)
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setMimeTypes("application/vnd.google-apps.folder");
+      try{ if(typeof sharedView.setEnableDrives === "function") sharedView.setEnableDrives(true); }catch(_){ }
+      try{ if(typeof sharedView.setIncludeTeamDrives === "function") sharedView.setIncludeTeamDrives(true); }catch(_){ }
+    }catch(_){ sharedView = null; }
+
     openDrivePicker({
       title: "Válassz Drive mappát",
-      view,
+      view: [view, sharedView],
       token,
       onPicked: (doc)=>{
         driveFolderId = doc.id;
@@ -1375,6 +1397,7 @@ async function loadDataFromBlob(blob, filename){
   async function openDriveDataPicker(){
     updateDriveDataStatus("Google Drive megnyitása...");
     await ensureGapiLoadedForData();
+    await ensureDrivePicker();
     const token = await ensureDriveDataToken();
     if(!token){
       updateDriveDataStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
@@ -1411,6 +1434,7 @@ async function loadDataFromBlob(blob, filename){
     async function openDriveTemplatePicker(){
     updateDriveTemplateStatus("Google Drive megnyitása...");
     await ensureGapiLoadedForData();
+    await ensureDrivePicker();
     const token = await ensureDriveDataToken();
     if(!token){
       updateDriveTemplateStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
