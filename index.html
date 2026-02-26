@@ -990,6 +990,10 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
       }
     }catch(_){}
 
+    // Shared drives / megosztott tartalmak támogatása (ha a Picker API verziója tudja)
+    try{ if(typeof view.setEnableDrives === "function") view.setEnableDrives(true); }catch(_){ }
+    try{ if(typeof view.setIncludeTeamDrives === "function") view.setIncludeTeamDrives(true); }catch(_){ }
+
     return view;
   }
 
@@ -1453,11 +1457,11 @@ async function loadDataFromBlob(blob, filename){
 	    });
 	  }
 
-	  const driveDataBtn = document.getElementById(\"driveDataBtn\");
+	  const driveDataBtn = document.getElementById("driveDataBtn");
 	  if(driveDataBtn){
-	    driveDataBtn.addEventListener(\"click\", async ()=>{
+	    driveDataBtn.addEventListener("click", async ()=>{
 	      try{ await openDriveDataPicker(); }
-	      catch(err){ console.error(err); updateDriveDataStatus(\"Hiba: \"+(err && err.message ? err.message : err)); }
+	      catch(err){ console.error(err); updateDriveDataStatus("Hiba: "+(err && err.message ? err.message : err)); }
 	    });
 	  }
 })();
