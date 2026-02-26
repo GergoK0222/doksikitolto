@@ -1280,19 +1280,24 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
       }
     });
   }
+  // --- Drive gombok bekötése (ne támaszkodjunk az id->globál változóra) ---
+  const driveLoginBtnEl  = document.getElementById('driveLoginBtn');
+  const driveFolderBtnEl = document.getElementById('driveFolderBtn');
 
-  
-
-  if(driveLoginBtn){
-    driveLoginBtn.addEventListener("click", async ()=>{
+  if(driveLoginBtnEl){
+    driveLoginBtnEl.addEventListener('click', async ()=>{
       try{ await driveSignIn(); }
-      catch(err){ console.error(err); setDriveAuthStatus("Hiba: " + (err && err.message ? err.message : err)); }
+      catch(err){ console.error(err); setDriveAuthStatus('Hiba: ' + (err && err.message ? err.message : err)); }
     });
   }
 
-  if(driveFolderBtn){
-    driveFolderBtn.addEventListener("click", async ()=>{
+  if(driveFolderBtnEl){
+    driveFolderBtnEl.addEventListener('click', async ()=>{
       try{ await openDriveFolderPicker(); }
+      catch(err){ console.error(err); setDriveFolderStatus('Hiba: ' + (err && err.message ? err.message : err)); }
+    });
+  }
+
       catch(err){ console.error(err); setDriveFolderStatus("Hiba: " + (err && err.message ? err.message : err)); }
     });
   }
@@ -1338,7 +1343,7 @@ function driveLibsReady(){
       // Egységes token: a felső "Drive bejelentkezés" gomb tölti be.
       // Itt NEM indítunk automatikus bejelentkezést / consent flow-t.
       if(driveUploadToken){ resolve(driveUploadToken); return; }
-      if(driveAccessToken){ driveUploadToken = driveAccessToken; resolve(driveUploadToken); return; }
+      if(driveAccessToken){ driveUploadToken = driveAccessToken; try{ window.driveAccessToken = driveAccessToken; window.driveUploadToken = driveUploadToken; }catch(_){} resolve(driveUploadToken); return; }
 
       // Ha valaki mégis explicit promptot kér (pl. a felső gomb), akkor kérhetünk tokent:
       if(promptMode){
@@ -1353,6 +1358,7 @@ function driveLibsReady(){
           }
           driveAccessToken = resp.access_token;
           driveUploadToken = driveAccessToken;
+          try{ window.driveAccessToken = driveAccessToken; window.driveUploadToken = driveUploadToken; }catch(_){}
           resolve(driveUploadToken);
         };
         driveTokenClient.requestAccessToken({ prompt: "consent" });
