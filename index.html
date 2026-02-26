@@ -969,7 +969,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 
 
   // --- Egységes Drive Picker (Drive-szerű mappanézet) ---
-  function buildDriveDocsView({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, startFolderId=null, viewMode="LIST", ownedByMe=null }){
+  function buildDriveDocsView({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, startFolderId=null, viewMode="LIST", ownedByMe=null, enableDrives=false, includeTeamDrives=false, label=null }){
     const view = new google.picker.DocsView(google.picker.ViewId.DOCS);
 
     // Drive-szerű böngészés: mappák látszanak és be lehet lépni.
@@ -993,51 +993,64 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
     }catch(_){}
 
     // Shared drives / megosztott tartalmak támogatása (ha a Picker API verziója tudja)
-    try{ if(typeof view.setEnableDrives === "function") view.setEnableDrives(true); }catch(_){ }
-    try{ if(typeof view.setIncludeTeamDrives === "function") view.setIncludeTeamDrives(true); }catch(_){ }
+    try{ if(enableDrives && typeof view.setEnableDrives === "function") view.setEnableDrives(true); }catch(_){ }
+    try{ if(includeTeamDrives && typeof view.setIncludeTeamDrives === "function") view.setIncludeTeamDrives(true); }catch(_){ }
+    try{ if(label && typeof view.setLabel === "function") view.setLabel(label); }catch(_){ }
 
     return view;
   }
 
   // Két nézet: Saját meghajtó + Velem megosztott (Drive-szerű böngészés)
   function buildMyAndSharedViews({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, viewMode="LIST", startFolderId=null }){
+    // 1) Saját meghajtó (My Drive) – itt NE kapcsoljuk be a "drives" módot, különben csak Shared drives látszik.
     const myView = buildDriveDocsView({
       mimeTypes,
       allowFoldersNav,
       allowSelectFolder,
       startFolderId,      // ha null, nem kényszerítünk parentet
       viewMode,
-      ownedByMe: null
+      ownedByMe: null,
+      enableDrives: false,
+      includeTeamDrives: false,
+      label: "Saját meghajtó"
     });
 
-    // Shared with me view (ha elérhető)
-    let sharedView = null;
+    // 2) Megosztva velem (Shared with me)
+    let sharedWithMeView = null;
     try{
       if(google && google.picker && google.picker.ViewId && google.picker.ViewId.DOCS_SHARED_WITH_ME){
-        sharedView = new google.picker.DocsView(google.picker.ViewId.DOCS_SHARED_WITH_ME);
-      }else{
-        // fallback: DOCS view ownedByMe=false (nem tökéletes, de jobb mint semmi)
-        sharedView = new google.picker.DocsView(google.picker.ViewId.DOCS);
-        if(typeof sharedView.setOwnedByMe === "function") sharedView.setOwnedByMe(false);
+        sharedWithMeView = new google.picker.DocsView(google.picker.ViewId.DOCS_SHARED_WITH_ME);
+        sharedWithMeView.setIncludeFolders(!!allowFoldersNav);
+        sharedWithMeView.setSelectFolderEnabled(!!allowSelectFolder);
+        if(mimeTypes) sharedWithMeView.setMimeTypes(mimeTypes);
+        try{
+          if(viewMode && google.picker.DocsViewMode && google.picker.DocsViewMode[viewMode]){
+            sharedWithMeView.setMode(google.picker.DocsViewMode[viewMode]);
+          }
+        }catch(_){}
+        try{ if(typeof sharedWithMeView.setLabel === "function") sharedWithMeView.setLabel("Megosztva velem"); }catch(_){}
       }
-      sharedView.setIncludeFolders(!!allowFoldersNav);
-      sharedView.setSelectFolderEnabled(!!allowSelectFolder);
-      
-      try{ if(typeof sharedView.setEnableDrives === "function") sharedView.setEnableDrives(true); }catch(_){ }
-      try{ if(typeof sharedView.setIncludeTeamDrives === "function") sharedView.setIncludeTeamDrives(true); }catch(_){ }
-if(mimeTypes) sharedView.setMimeTypes(mimeTypes);
-      try{
-        if(viewMode && google.picker.DocsViewMode && google.picker.DocsViewMode[viewMode]){
-          sharedView.setMode(google.picker.DocsViewMode[viewMode]);
-        }
-      }catch(_){}
-      try{ if(typeof sharedView.setEnableDrives === "function") sharedView.setEnableDrives(true); }catch(_){}
-      try{ if(typeof sharedView.setIncludeTeamDrives === "function") sharedView.setIncludeTeamDrives(true); }catch(_){}
     }catch(_){
-      sharedView = null;
+      sharedWithMeView = null;
     }
 
-    return sharedView ? [myView, sharedView] : [myView];
+    // 3) Közös meghajtók (Shared drives / Team drives)
+    const sharedDrivesView = buildDriveDocsView({
+      mimeTypes,
+      allowFoldersNav,
+      allowSelectFolder,
+      startFolderId: null, // shared drives-nál ne erőltessünk root/parentet
+      viewMode,
+      ownedByMe: null,
+      enableDrives: true,
+      includeTeamDrives: true,
+      label: "Közös meghajtók"
+    });
+
+    const views = [myView, sharedDrivesView];
+    if(sharedWithMeView) views.splice(1, 0, sharedWithMeView); // My Drive után szúrjuk be
+
+    return views;
   }
 
   function openDrivePicker({ title, view, token, onPicked, onCancel }){
