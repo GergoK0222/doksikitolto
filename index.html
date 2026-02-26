@@ -329,6 +329,17 @@ eval("\n\nvar PizZipUtils = {};\n// just use the responseText with xhr1, respons
 
 <script>
 const $ = id=>document.getElementById(id);
+
+// --- Drive UI elemek (státuszok) ---
+const driveAuthStatus = $('driveAuthStatus');
+const driveFolderStatus = $('driveFolderStatus');
+const driveTemplateStatusEl = $('driveTemplateStatus');
+const driveDataStatusEl = $('driveDataStatus');
+
+function updateDriveTemplateStatus(msg){ if(driveTemplateStatusEl) driveTemplateStatusEl.textContent = msg || ""; }
+function updateDriveDataStatus(msg){ if(driveDataStatusEl) driveDataStatusEl.textContent = msg || ""; }
+function setDriveAuthStatus(msg){ if(driveAuthStatus) driveAuthStatus.textContent = msg || ""; }
+function setDriveFolderStatus(msg){ if(driveFolderStatus) driveFolderStatus.textContent = msg || ""; }
 const logBox = $('log');
 function log(m,c){const d=document.createElement('div');d.textContent=m; if(c) d.className=c; logBox.appendChild(d); logBox.scrollTop=logBox.scrollHeight;}
 
@@ -956,7 +967,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 
 
   // --- Egységes Drive Picker (Drive-szerű mappanézet) ---
-  function buildDriveDocsView({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, startFolderId=null, viewMode="LIST" }){
+  function buildDriveDocsView({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, startFolderId=null, viewMode="LIST", ownedByMe=null }){
     const view = new google.picker.DocsView(google.picker.ViewId.DOCS);
 
     // Drive-szerű böngészés: mappák látszanak és be lehet lépni.
@@ -966,8 +977,12 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
     if(mimeTypes) view.setMimeTypes(mimeTypes);
 
     // Kezdő mappa: ha van kiválasztott Drive mappa, onnan induljanak a pickerek.
-    const parentId = startFolderId || driveFolderId || "root";
-    if(typeof view.setParent === "function") view.setParent(parentId);
+    // startFolderId === null -> ne kényszerítsünk parentet (így látszik a 'Megosztva velem' is a bal oldalon)
+    const parentId = (startFolderId !== null) ? (startFolderId || "root") : (driveFolderId || null);
+    if(parentId && typeof view.setParent === "function") view.setParent(parentId);
+
+    // Megosztott tartalmak: ownedByMe=false esetén a 'Megosztva velem' alatti elemek is elérhetők.
+    try{ if(ownedByMe !== null && typeof view.setOwnedByMe === "function") view.setOwnedByMe(!!ownedByMe); }catch(_){ }
 
     try{
       if(viewMode && google.picker.DocsViewMode && google.picker.DocsViewMode[viewMode]){
@@ -980,6 +995,8 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 
   function openDrivePicker({ title, view, token, onPicked, onCancel }){
     const picker = new google.picker.PickerBuilder()
+      .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
+      .enableFeature(google.picker.Feature.SUPPORT_TEAM_DRIVES)
       .setOAuthToken(token)
       .setDeveloperKey(DRIVE_API_KEY)
       .setTitle(title || "Google Drive")
@@ -1013,7 +1030,8 @@ window.openImagePickerForCell = async function openImagePickerForCell(rowIndex, 
       allowFoldersNav: true,
       allowSelectFolder: false,
       startFolderId: driveFolderId || "root",
-      viewMode: "LIST"
+      viewMode: "LIST",
+      ownedByMe: false
     });
 
     openDrivePicker({
@@ -1114,7 +1132,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
     async function openDriveFolderPicker(){
     setDriveFolderStatus("Drive mappa választó megnyitása...");
     await ensureGapiLoadedForData();
-    const token = await ensureDriveUploadToken(false);
+    const token = await ensureDriveDataToken();
     if(!token){
       setDriveFolderStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
       return;
@@ -1124,8 +1142,9 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
       mimeTypes: "application/vnd.google-apps.folder",
       allowFoldersNav: true,
       allowSelectFolder: true,
-      startFolderId: "root",
-      viewMode: "LIST"
+      startFolderId: null,
+      viewMode: "LIST",
+      ownedByMe: false
     });
 
     openDrivePicker({
@@ -1141,12 +1160,6 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
       }
     });
   }
-  function updateDriveTemplateStatus(msg){
-    if(driveTemplateStatusEl) driveTemplateStatusEl.textContent = msg || "";
-  }
-
-function setDriveAuthStatus(msg){ if(driveAuthStatus) driveAuthStatus.textContent = msg || ""; }
-  function setDriveFolderStatus(msg){ if(driveFolderStatus) driveFolderStatus.textContent = msg || ""; }
 
   
 
@@ -1329,6 +1342,68 @@ async function loadDataFromBlob(blob, filename){
     await loadTemplateFromBlob(blob, name);
   }
 
+
+  // --- Drive adattábla betöltés (XLSX/CSV/Google Sheets) ---
+  async function downloadDriveDataFile(file){
+    const fileId = file.id;
+    const name = file.name || "drive_data.xlsx";
+    const mimeType = file.mimeType || "";
+
+    const accessToken = driveUploadToken;
+    if(!accessToken) throw new Error("Nincs Drive token");
+
+    let url;
+    if(mimeType === "application/vnd.google-apps.spreadsheet"){
+      // Google Sheets -> export XLSX
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" +
+            encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }else{
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+    }
+
+    const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
+    if(!res.ok) throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+
+    const blob = await res.blob();
+    await loadDataFromBlob(blob, name);
+  }
+
+  async function openDriveDataPicker(){
+    updateDriveDataStatus("Google Drive megnyitása...");
+    await ensureGapiLoadedForData();
+    const token = await ensureDriveDataToken();
+    if(!token){
+      updateDriveDataStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
+      return;
+    }
+
+    const view = buildDriveDocsView({
+      mimeTypes: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/vnd.google-apps.spreadsheet",
+      allowFoldersNav: true,
+      allowSelectFolder: false,
+      startFolderId: driveFolderId || "root",
+      viewMode: "LIST",
+      ownedByMe: false
+    });
+
+    openDrivePicker({
+      title: "Válassz adattáblát a Drive-ból",
+      view,
+      token,
+      onPicked: async (doc)=>{
+        try{
+          updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
+          await downloadDriveDataFile(doc);
+          updateDriveDataStatus("Adattábla betöltve Drive-ról: " + (doc.name || ""));
+        }catch(err){
+          console.error(err);
+          updateDriveDataStatus("Hiba: " + (err && err.message ? err.message : err));
+        }
+      },
+      onCancel: ()=> updateDriveDataStatus("Adattábla kiválasztása megszakítva.")
+    });
+  }
+
     async function openDriveTemplatePicker(){
     updateDriveTemplateStatus("Google Drive megnyitása...");
     await ensureGapiLoadedForData();
@@ -1375,6 +1450,14 @@ async function loadDataFromBlob(blob, filename){
 	        console.error(err);
 	        updateDriveTemplateStatus("Hiba: "+(err && err.message ? err.message : err));
 	      }
+	    });
+	  }
+
+	  const driveDataBtn = document.getElementById(\"driveDataBtn\");
+	  if(driveDataBtn){
+	    driveDataBtn.addEventListener(\"click\", async ()=>{
+	      try{ await openDriveDataPicker(); }
+	      catch(err){ console.error(err); updateDriveDataStatus(\"Hiba: \"+(err && err.message ? err.message : err)); }
 	    });
 	  }
 })();
