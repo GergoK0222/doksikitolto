@@ -955,6 +955,47 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
   }
 
 
+  // --- Egységes Drive Picker (Drive-szerű mappanézet) ---
+  function buildDriveDocsView({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, startFolderId=null, viewMode="LIST" }){
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS);
+
+    // Drive-szerű böngészés: mappák látszanak és be lehet lépni.
+    view.setIncludeFolders(!!allowFoldersNav);
+    view.setSelectFolderEnabled(!!allowSelectFolder);
+
+    if(mimeTypes) view.setMimeTypes(mimeTypes);
+
+    // Kezdő mappa: ha van kiválasztott Drive mappa, onnan induljanak a pickerek.
+    const parentId = startFolderId || driveFolderId || "root";
+    if(typeof view.setParent === "function") view.setParent(parentId);
+
+    try{
+      if(viewMode && google.picker.DocsViewMode && google.picker.DocsViewMode[viewMode]){
+        view.setMode(google.picker.DocsViewMode[viewMode]);
+      }
+    }catch(_){}
+
+    return view;
+  }
+
+  function openDrivePicker({ title, view, token, onPicked, onCancel }){
+    const picker = new google.picker.PickerBuilder()
+      .setOAuthToken(token)
+      .setDeveloperKey(DRIVE_API_KEY)
+      .setTitle(title || "Google Drive")
+      .addView(view)
+      .setCallback((data)=>{
+        if(data.action === google.picker.Action.PICKED){
+          const doc = data.docs && data.docs[0];
+          if(doc) onPicked && onPicked(doc);
+        }else if(data.action === google.picker.Action.CANCEL){
+          onCancel && onCancel();
+        }
+      })
+      .build();
+    picker.setVisible(true);
+  }
+
 // --- Drive képcsere (adat-táblában) ---
 // A Data Preview-ben lévő "Válassz képet (Drive)" gomb ehhez a függvényhez hív.
 // Nem indítunk bejelentkezést: ha nincs token, csak üzenetet írunk.
@@ -966,36 +1007,32 @@ window.openImagePickerForCell = async function openImagePickerForCell(rowIndex, 
       log("Drive képválasztó: előbb jelentkezz be a Drive-hoz (felső gomb).","warn");
       return;
     }
-    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
-      .setIncludeFolders(false)
-      .setSelectFolderEnabled(false)
-      .setMimeTypes("image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/svg+xml,application/vnd.google-apps.drawing");
 
-    const picker = new google.picker.PickerBuilder()
-      .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_API_KEY)
-      .addView(view)
-      .setCallback((data)=>{
-        if(data.action === google.picker.Action.PICKED){
-          const doc = data.docs && data.docs[0];
-          if(!doc) return;
+    const view = buildDriveDocsView({
+      mimeTypes: "image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/svg+xml,application/vnd.google-apps.drawing",
+      allowFoldersNav: true,
+      allowSelectFolder: false,
+      startFolderId: driveFolderId || "root",
+      viewMode: "LIST"
+    });
 
-          // A cellába Drive ref kerül, amit később a generálás fetch-el.
-          const ref = "drive:" + doc.id;
-          // A belső adattábla: dataRows. (A window.dataRows nem mindenhol volt beállítva.)
-          if(Array.isArray(dataRows) && dataRows[rowIndex]){
-            dataRows[rowIndex][colName] = ref;
-            try{ window.dataRows = dataRows; }catch(_){}
-            renderDataPreview(dataRows);
-            log(`Drive kép kiválasztva: ${doc.name || doc.id} → ${colName} (sor ${rowIndex+1})`,"ok");
-          }else{
-            log("Nem találom a táblázat sorait (dataRows).","warn");
-          }
+    openDrivePicker({
+      title: "Válassz képet a Drive-ból",
+      view,
+      token,
+      onPicked: (doc)=>{
+        const ref = "drive:" + doc.id;
+        if(Array.isArray(dataRows) && dataRows[rowIndex]){
+          dataRows[rowIndex][colName] = ref;
+          try{ window.dataRows = dataRows; }catch(_){}
+          renderDataPreview(dataRows);
+          log(`Drive kép kiválasztva: ${doc.name || doc.id} → ${colName} (sor ${rowIndex+1})`,"ok");
+        }else{
+          log("Nem találom a táblázat sorait (dataRows).","warn");
         }
-      })
-      .build();
-
-    picker.setVisible(true);
+      },
+      onCancel: ()=>{}
+    });
   }catch(err){
     console.error(err);
     log("Drive képválasztó hiba: " + (err && err.message ? err.message : err), "err");
@@ -1074,7 +1111,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
     return token;
   }
 
-  async function openDriveFolderPicker(){
+    async function openDriveFolderPicker(){
     setDriveFolderStatus("Drive mappa választó megnyitása...");
     await ensureGapiLoadedForData();
     const token = await ensureDriveUploadToken(false);
@@ -1083,43 +1120,26 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
       return;
     }
 
-    const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-      .setIncludeFolders(true)
-      .setSelectFolderEnabled(true);
+    const view = buildDriveDocsView({
+      mimeTypes: "application/vnd.google-apps.folder",
+      allowFoldersNav: true,
+      allowSelectFolder: true,
+      startFolderId: "root",
+      viewMode: "LIST"
+    });
 
-    const picker = new google.picker.PickerBuilder()
-      .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_API_KEY)
-      .addView(view)
-      .setCallback((data)=>{
-        if(data.action === google.picker.Action.PICKED){
-          const doc = data.docs && data.docs[0];
-          if(!doc) return;
-          driveFolderId = doc.id;
-          setDriveFolderStatus("Kiválasztott mappa: " + (doc.name || doc.id));
-        }else if(data.action === google.picker.Action.CANCEL){
-          setDriveFolderStatus("Mappa kiválasztása megszakítva.");
-        }
-      })
-      .build();
-
-    picker.setVisible(true);
-  }
-
-const driveLoginBtn = document.getElementById("driveLoginBtn");
-const driveLogoutBtn = null;
-const driveFolderBtn = document.getElementById("driveFolderBtn");
-  const driveAlsoSave = document.getElementById("driveAlsoSave");
-  const driveAuthStatus = document.getElementById("driveAuthStatus");
-  const driveFolderStatus = document.getElementById("driveFolderStatus");
-
-  
-  // státusz mezők a Drive-ból betöltésekhez
-  const driveDataStatusEl = document.getElementById("driveDataStatus");
-  const driveTemplateStatusEl = document.getElementById("driveTemplateStatus");
-
-  function updateDriveDataStatus(msg){
-    if(driveDataStatusEl) driveDataStatusEl.textContent = msg || "";
+    openDrivePicker({
+      title: "Válassz Drive mappát",
+      view,
+      token,
+      onPicked: (doc)=>{
+        driveFolderId = doc.id;
+        setDriveFolderStatus("Kiválasztott mappa: " + (doc.name || doc.id));
+      },
+      onCancel: ()=>{
+        setDriveFolderStatus("Mappa kiválasztása megszakítva.");
+      }
+    });
   }
   function updateDriveTemplateStatus(msg){
     if(driveTemplateStatusEl) driveTemplateStatusEl.textContent = msg || "";
@@ -1309,92 +1329,39 @@ async function loadDataFromBlob(blob, filename){
     await loadTemplateFromBlob(blob, name);
   }
 
-  async function openDriveTemplatePicker(){
-    updateDriveTemplateStatus("Kapcsolódás Google Drive-hoz...");
+    async function openDriveTemplatePicker(){
+    updateDriveTemplateStatus("Google Drive megnyitása...");
     await ensureGapiLoadedForData();
     const token = await ensureDriveDataToken();
     if(!token){
-      updateDriveTemplateStatus("Nincs jogosultság a Drive olvasásához.");
+      updateDriveTemplateStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
       return;
     }
 
-    const view = new google.picker.DocsView()
-      .setIncludeFolders(false)
-      .setSelectFolderEnabled(false)
-      .setMimeTypes("application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.google-apps.document");
+    const view = buildDriveDocsView({
+      mimeTypes: "application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.google-apps.document",
+      allowFoldersNav: true,
+      allowSelectFolder: false,
+      startFolderId: driveFolderId || "root",
+      viewMode: "LIST"
+    });
 
-    const picker = new google.picker.PickerBuilder()
-      .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_API_KEY)
-      .addView(view)
-      .setCallback(async data=>{
-        if(data.action === google.picker.Action.PICKED){
-          const doc = data.docs && data.docs[0];
-          if(!doc) return;
-          try{
-            updateDriveTemplateStatus("Sablon letöltése a Drive-ról...");
-            await downloadDriveTemplateFile(doc);
-            updateDriveTemplateStatus("Sablon betöltve Drive-ról: "+(doc.name||""));
-          }catch(err){
-            console.error(err);
-            updateDriveTemplateStatus("Hiba: "+(err && err.message ? err.message : err));
-          }
-        }else if(data.action === google.picker.Action.CANCEL){
-          updateDriveTemplateStatus("Sablon kiválasztása megszakítva.");
+    openDrivePicker({
+      title: "Válassz sablont a Drive-ból",
+      view,
+      token,
+      onPicked: async (doc)=>{
+        try{
+          updateDriveTemplateStatus("Sablon letöltése a Drive-ról...");
+          await downloadDriveTemplateFile(doc);
+          updateDriveTemplateStatus("Sablon betöltve Drive-ról: " + (doc.name || ""));
+        }catch(err){
+          console.error(err);
+          updateDriveTemplateStatus("Hiba: " + (err && err.message ? err.message : err));
         }
-      })
-      .build();
-
-    picker.setVisible(true);
-  }
-
-  async function openDriveDataPicker(){
-    updateDriveDataStatus("Kapcsolódás Google Drive-hoz...");
-    await ensureGapiLoadedForData();
-    const token = await ensureDriveDataToken();
-    if(!token){
-      updateDriveDataStatus("Nincs jogosultság a Drive olvasásához.");
-      return;
-    }
-
-    const view = new google.picker.DocsView()
-      .setIncludeFolders(false)
-      .setSelectFolderEnabled(false)
-      .setMimeTypes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.google-apps.spreadsheet");
-
-    const picker = new google.picker.PickerBuilder()
-      .setOAuthToken(token)
-      .setDeveloperKey(DRIVE_API_KEY)
-      .addView(view)
-      .setCallback(async data=>{
-        if(data.action === google.picker.Action.PICKED){
-          const doc = data.docs && data.docs[0];
-          if(!doc) return;
-          try{
-            updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
-            await downloadDriveDataFile(doc);
-            updateDriveDataStatus("Adattábla beolvasva a Drive-ról: "+(doc.name||""));
-          }catch(err){
-            console.error(err);
-            updateDriveDataStatus("Hiba: "+err.message);
-          }
-        }else if(data.action === google.picker.Action.CANCEL){
-          updateDriveDataStatus("Adattábla kiválasztása megszakítva.");
-        }
-      })
-      .build();
-
-    picker.setVisible(true);
-  }
-
-  const driveDataBtn = document.getElementById("driveDataBtn");
-  if(driveDataBtn){
-    driveDataBtn.addEventListener("click", async ()=>{
-      try{
-        await openDriveDataPicker();
-      }catch(err){
-        console.error(err);
-        updateDriveDataStatus("Hiba: "+err.message);
+      },
+      onCancel: ()=>{
+        updateDriveTemplateStatus("Sablon kiválasztása megszakítva.");
       }
     });
   }
