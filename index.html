@@ -331,6 +331,14 @@ eval("\n\nvar PizZipUtils = {};\n// just use the responseText with xhr1, respons
 const $ = id=>document.getElementById(id);
 const logBox = $('log');
 function log(m,c){const d=document.createElement('div');d.textContent=m; if(c) d.className=c; logBox.appendChild(d); logBox.scrollTop=logBox.scrollHeight;}
+
+// Globális JS hibák naplózása (hogy ne „némán” haljanak meg a gombok)
+window.addEventListener('error', (ev)=>{
+  try{ log('JS hiba: ' + (ev && ev.message ? ev.message : ev), 'err'); }catch(_){}
+});
+window.addEventListener('unhandledrejection', (ev)=>{
+  try{ log('Promise hiba: ' + ((ev && ev.reason && ev.reason.message) ? ev.reason.message : (ev.reason||ev)), 'err'); }catch(_){}
+});
 let templateArrayBuffer=null, templateName=null, currentTemplate=null;
 let dataRows=[], headers=[], dirHandle=null, mapping={}, tagGroup={}, imageZip=null, allowUrl=true;
 
@@ -974,11 +982,11 @@ window.openImagePickerForCell = async function openImagePickerForCell(rowIndex, 
 
           // A cellába Drive ref kerül, amit később a generálás fetch-el.
           const ref = "drive:" + doc.id;
-          if(Array.isArray(window.dataRows) && window.dataRows[rowIndex]){
-            window.dataRows[rowIndex][colName] = ref;
-            // tükrözzük a belső változókat is, ha vannak
-            try{ if(typeof dataRows!=="undefined" && dataRows[rowIndex]) dataRows[rowIndex][colName]=ref; }catch(_){}
-            renderDataPreview(window.dataRows);
+          // A belső adattábla: dataRows. (A window.dataRows nem mindenhol volt beállítva.)
+          if(Array.isArray(dataRows) && dataRows[rowIndex]){
+            dataRows[rowIndex][colName] = ref;
+            try{ window.dataRows = dataRows; }catch(_){}
+            renderDataPreview(dataRows);
             log(`Drive kép kiválasztva: ${doc.name || doc.id} → ${colName} (sor ${rowIndex+1})`,"ok");
           }else{
             log("Nem találom a táblázat sorait (dataRows).","warn");
@@ -1161,6 +1169,11 @@ function driveLibsReady(){
       if(drivePickerLoaded){ resolve(); return; }
       if(typeof gapi === "undefined"){ reject(new Error("gapi nem érhető el")); return; }
       gapi.load("client:picker", ()=>{
+        try{
+          if(gapi.client && typeof gapi.client.setApiKey === "function"){
+            gapi.client.setApiKey(DRIVE_API_KEY);
+          }
+        }catch(_){}
         drivePickerLoaded = true;
         resolve();
       });
@@ -1211,6 +1224,7 @@ async function loadDataFromBlob(blob, filename){
         const wb = XLSXlib.read(arr,{type:'array'});
         const ws = wb.Sheets[wb.SheetNames[0]];
         dataRows = XLSXlib.utils.sheet_to_json(ws,{defval:""});
+        try{ window.dataRows = dataRows; }catch(_){ }
         log('XLSX (Drive) beolvasva. Sorok: '+dataRows.length,'ok');
       }else{
         const text = await blob.text();
