@@ -1206,7 +1206,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
 
     openDrivePicker({
       title: "Válassz Drive mappát",
-      view: [view, sharedView],
+      view: view,
       token,
       onPicked: (doc)=>{
         driveFolderId = doc.id;
