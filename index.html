@@ -978,7 +978,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 
     // Kezdő mappa: ha van kiválasztott Drive mappa, onnan induljanak a pickerek.
     // startFolderId === null -> ne kényszerítsünk parentet (így látszik a 'Megosztva velem' is a bal oldalon)
-    const parentId = (startFolderId !== null) ? (startFolderId || "root") : (driveFolderId || null);
+    const parentId = (startFolderId !== null) ? (startFolderId || "root") : null;
     if(parentId && typeof view.setParent === "function") view.setParent(parentId);
 
     // Megosztott tartalmak: ownedByMe=false esetén a 'Megosztva velem' alatti elemek is elérhetők.
@@ -995,6 +995,44 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
     try{ if(typeof view.setIncludeTeamDrives === "function") view.setIncludeTeamDrives(true); }catch(_){ }
 
     return view;
+  }
+
+  // Két nézet: Saját meghajtó + Velem megosztott (Drive-szerű böngészés)
+  function buildMyAndSharedViews({ mimeTypes, allowFoldersNav=true, allowSelectFolder=false, viewMode="LIST", startFolderId=null }){
+    const myView = buildDriveDocsView({
+      mimeTypes,
+      allowFoldersNav,
+      allowSelectFolder,
+      startFolderId,      // ha null, nem kényszerítünk parentet
+      viewMode,
+      ownedByMe: null
+    });
+
+    // Shared with me view (ha elérhető)
+    let sharedView = null;
+    try{
+      if(google && google.picker && google.picker.ViewId && google.picker.ViewId.DOCS_SHARED_WITH_ME){
+        sharedView = new google.picker.DocsView(google.picker.ViewId.DOCS_SHARED_WITH_ME);
+      }else{
+        // fallback: DOCS view ownedByMe=false (nem tökéletes, de jobb mint semmi)
+        sharedView = new google.picker.DocsView(google.picker.ViewId.DOCS);
+        if(typeof sharedView.setOwnedByMe === "function") sharedView.setOwnedByMe(false);
+      }
+      sharedView.setIncludeFolders(!!allowFoldersNav);
+      sharedView.setSelectFolderEnabled(!!allowSelectFolder);
+      if(mimeTypes) sharedView.setMimeTypes(mimeTypes);
+      try{
+        if(viewMode && google.picker.DocsViewMode && google.picker.DocsViewMode[viewMode]){
+          sharedView.setMode(google.picker.DocsViewMode[viewMode]);
+        }
+      }catch(_){}
+      try{ if(typeof sharedView.setEnableDrives === "function") sharedView.setEnableDrives(true); }catch(_){}
+      try{ if(typeof sharedView.setIncludeTeamDrives === "function") sharedView.setIncludeTeamDrives(true); }catch(_){}
+    }catch(_){
+      sharedView = null;
+    }
+
+    return sharedView ? [myView, sharedView] : [myView];
   }
 
   function openDrivePicker({ title, view, token, onPicked, onCancel }){
@@ -1039,13 +1077,12 @@ window.openImagePickerForCell = async function openImagePickerForCell(rowIndex, 
       return;
     }
 
-    const view = buildDriveDocsView({
+    const view = buildMyAndSharedViews({
       mimeTypes: "image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/svg+xml,application/vnd.google-apps.drawing",
       allowFoldersNav: true,
       allowSelectFolder: false,
-      startFolderId: driveFolderId || "root",
-      viewMode: "LIST",
-      ownedByMe: false
+      startFolderId: null,
+      viewMode: "LIST"
     });
 
     openDrivePicker({
@@ -1153,25 +1190,13 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
       return;
     }
 
-    const view = buildDriveDocsView({
+    const view = buildMyAndSharedViews({
       mimeTypes: "application/vnd.google-apps.folder",
       allowFoldersNav: true,
       allowSelectFolder: true,
       startFolderId: null,
-      viewMode: "LIST",
-      ownedByMe: false
+      viewMode: "LIST"
     });
-
-    // plusz nézet: Megosztva velem (mappák)
-    let sharedView = null;
-    try{
-      sharedView = new google.picker.DocsView(google.picker.ViewId.DOCS_SHARED_WITH_ME)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(true)
-        .setMimeTypes("application/vnd.google-apps.folder");
-      try{ if(typeof sharedView.setEnableDrives === "function") sharedView.setEnableDrives(true); }catch(_){ }
-      try{ if(typeof sharedView.setIncludeTeamDrives === "function") sharedView.setIncludeTeamDrives(true); }catch(_){ }
-    }catch(_){ sharedView = null; }
 
     openDrivePicker({
       title: "Válassz Drive mappát",
@@ -1404,13 +1429,12 @@ async function loadDataFromBlob(blob, filename){
       return;
     }
 
-    const view = buildDriveDocsView({
+    const view = buildMyAndSharedViews({
       mimeTypes: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/vnd.google-apps.spreadsheet",
       allowFoldersNav: true,
       allowSelectFolder: false,
-      startFolderId: driveFolderId || "root",
-      viewMode: "LIST",
-      ownedByMe: false
+      startFolderId: null,
+      viewMode: "LIST"
     });
 
     openDrivePicker({
@@ -1441,11 +1465,11 @@ async function loadDataFromBlob(blob, filename){
       return;
     }
 
-    const view = buildDriveDocsView({
+    const view = buildMyAndSharedViews({
       mimeTypes: "application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.google-apps.document",
       allowFoldersNav: true,
       allowSelectFolder: false,
-      startFolderId: driveFolderId || "root",
+      startFolderId: null,
       viewMode: "LIST"
     });
 
