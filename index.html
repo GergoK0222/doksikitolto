@@ -1227,7 +1227,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
   }
 
   // normál kép: alt=media
-  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,{
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,{
     headers:{ Authorization: "Bearer " + token }
   });
   if(!dl.ok) throw new Error("Drive letöltés hiba: " + dl.status);
@@ -1425,7 +1425,7 @@ async function loadDataFromBlob(blob, filename){
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
     const res = await fetch(url, fetchOptions);
@@ -1462,7 +1462,7 @@ async function loadDataFromBlob(blob, filename){
     if(mimeType === "application/vnd.google-apps.document"){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
     const res = await fetch(url, fetchOptions);
@@ -1520,7 +1520,7 @@ async function loadDataFromBlob(blob, filename){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" +
             encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
     const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
@@ -2065,7 +2065,7 @@ async function listFiles(folderId, token){
     if((f.mimeType||'').startsWith('image/')){
       dbPreviewBody.innerHTML = '<div class="small" style="color:var(--muted)">Kép betöltése…</div>';
       try{
-        const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.id)}?alt=media`;
+        const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.id)}?alt=media&supportsAllDrives=true`;
         const res = await fetch(url, { headers:{ Authorization:'Bearer '+token }});
         if(!res.ok) throw new Error('Kép letöltése sikertelen ('+res.status+')');
         const blob = await res.blob();
