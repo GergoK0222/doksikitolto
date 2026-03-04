@@ -154,7 +154,7 @@ th{background:#0f1830}
   <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
     <button type="button" class="btn" id="driveLoginBtn">Drive bejelentkezés</button>
     <div class="small" id="driveAuthStatus">Nincs bejelentkezve.</div>
-    <div class="small">Build: fix6-e7eb7dc1</div>
+    <div class="small">Build: most</div>
   </div>
 </header>
 <nav class="topnav">
@@ -681,10 +681,12 @@ document.getElementById('imgZipInput').addEventListener('change', async e=>{ con
 
 document.getElementById('gen').addEventListener('click', async ()=>{
   try{
-    // Egységes sablon állapot (Drive + helyi feltöltés)
+    // Szinkronizáljuk a globális állapotot (Drive / local betöltés mind ugyanide írjon)
     if(!templateArrayBuffer && window.templateArrayBuffer) templateArrayBuffer = window.templateArrayBuffer;
     if(!currentTemplate && window.currentTemplate) currentTemplate = window.currentTemplate;
-    if(!templateArrayBuffer || !currentTemplate) throw new Error('Nincs betöltött sablon.');
+    if(!templateName && window.templateName) templateName = window.templateName;
+
+    if(!templateArrayBuffer||!currentTemplate) throw new Error('Nincs betöltött sablon.');
     if(!dataRows.length) throw new Error('Nincs betöltött adattábla vagy üres.');
     const tagNames=Object.keys(currentTemplate.map);
     for(let i=0;i<dataRows.length;i++){
@@ -1473,7 +1475,7 @@ async function loadDataFromBlob(blob, filename){
       // 1) Globál állapot (a generálás ezt ellenőrzi)
       templateArrayBuffer = arr;
       templateName = name || 'template.docx';
-      try{ window.templateArrayBuffer = templateArrayBuffer; window.templateName = templateName; }catch(_){ }
+      try{ window.templateArrayBuffer = arr; window.templateName = templateName; }catch(_){ }
 
       // 2) TAG index (ugyanaz, mint a helyi fájlnál)
       const parsed = readTemplateFromArrayBuffer(arr);
@@ -2395,6 +2397,16 @@ async function listFiles(folderId, token){
   });
 
 })();
+
+
+  // --- Biztonság: a legutolsó Drive függvények kerüljenek a window alá (duplikált definíciók miatt) ---
+  try{
+    window.downloadDriveTemplateFile = downloadDriveTemplateFile;
+    window.downloadDriveDataFile = downloadDriveDataFile;
+    window.openDriveTemplatePicker = openDriveTemplatePicker;
+    window.openDriveDataPicker = openDriveDataPicker;
+    window.openDriveFolderPicker = openDriveFolderPicker;
+  }catch(_){}
 </script>
 
 </body>
