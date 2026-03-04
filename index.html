@@ -154,7 +154,7 @@ th{background:#0f1830}
   <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
     <button type="button" class="btn" id="driveLoginBtn">Drive bejelentkezés</button>
     <div class="small" id="driveAuthStatus">Nincs bejelentkezve.</div>
-    <div class="small">Build: most</div>
+    <div class="small">Build: fix6-e7eb7dc1</div>
   </div>
 </header>
 <nav class="topnav">
@@ -485,7 +485,7 @@ async function loadTemplateFromArrayBuffer(arr, filename){
   document.getElementById('error').textContent='';
   const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(arr);
   templateArrayBuffer=arr; templateName=filename||'template.docx'; currentTemplate={parts,contentTypesXml,map};
-  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; window.templateArrayBuffer = templateArrayBuffer; }catch(_){ }
+  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; }catch(_){}
   const tagNames=Object.keys(map);
   document.getElementById('docName').textContent=templateName+` – TAG-ek: ${tagNames.length}`;
   document.getElementById('tags').innerHTML='Talált TAG-ek: '+tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${map[t].length}</span></span>`).join(' ');
@@ -681,27 +681,10 @@ document.getElementById('imgZipInput').addEventListener('change', async e=>{ con
 
 document.getElementById('gen').addEventListener('click', async ()=>{
   try{
-    // Drive-os betöltésnél előfordulhat, hogy a globál állapot window.* alatt van;
-    // a generálás mindig ezeket tekintse forrásnak, és ha kell, újraépíti a currentTemplate-et.
-    let tplArr = (window.templateArrayBuffer ?? templateArrayBuffer);
-    if(!tplArr && window.__driveTemplateBlob){
-      try{ tplArr = await window.__driveTemplateBlob.arrayBuffer(); }catch(_){ /* ignore */ }
-    }
-    if(!tplArr) throw new Error('Nincs betöltött sablon.');
-
-    let tplObj = (window.currentTemplate ?? currentTemplate);
-    if(!tplObj || !tplObj.map){
-      // Biztonsági újrafeldolgozás: ha a sablon be van töltve (ArrayBuffer megvan), de a parsing állapot elveszett.
-      const parsed = readTemplateFromArrayBuffer(tplArr);
-      tplObj = { parts: parsed.parts, contentTypesXml: parsed.contentTypesXml, map: parsed.map };
-      window.currentTemplate = tplObj;
-    }
-
-    // Szinkronizáljuk a lokális változókat is, hogy a további kód egységesen működjön.
-    templateArrayBuffer = tplArr;
-    currentTemplate = tplObj;
-    if(window.templateName && !templateName) templateName = window.templateName;
-
+    // Egységes sablon állapot (Drive + helyi feltöltés)
+    if(!templateArrayBuffer && window.templateArrayBuffer) templateArrayBuffer = window.templateArrayBuffer;
+    if(!currentTemplate && window.currentTemplate) currentTemplate = window.currentTemplate;
+    if(!templateArrayBuffer || !currentTemplate) throw new Error('Nincs betöltött sablon.');
     if(!dataRows.length) throw new Error('Nincs betöltött adattábla vagy üres.');
     const tagNames=Object.keys(currentTemplate.map);
     for(let i=0;i<dataRows.length;i++){
@@ -1422,27 +1405,32 @@ async function loadDataFromBlob(blob, filename){
     }
   }
 
-  async function downloadDriveDataFile(file, tokenOverride){
+  async function downloadDriveDataFile(file){
     const fileId = file.id;
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
 
-    const accessToken = await ensureDriveUploadToken(false);
+    const accessToken = driveUploadToken;
     if(!accessToken) throw new Error("Nincs Drive token");
 
-    // Google Sheets -> export XLSX, egyébként alt=media
-    const url = (mimeType === "application/vnd.google-apps.spreadsheet")
-      ? ("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" +
-         encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-      : ("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media");
+    let url;
+    let fetchOptions = {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + accessToken }
+    };
 
-    const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
-    if(!res.ok) throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+    if(mimeType === "application/vnd.google-apps.spreadsheet"){
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }else{
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+    }
 
+    const res = await fetch(url, fetchOptions);
+    if(!res.ok){
+      throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+    }
     const blob = await res.blob();
-    try{ window.__driveTemplateBlob = blob; }catch(_){ }
     await loadDataFromBlob(blob, name);
-    try{ log("Drive adattábla betöltve: "+name, "ok"); }catch(_){}
   }
 
   // ----- Google Drive sablon (.docx) betöltés -----
@@ -1452,53 +1440,75 @@ async function loadDataFromBlob(blob, filename){
     await loadTemplateFromArrayBuffer(arr, filename || 'template.docx');
   }
 
-  async function downloadDriveTemplateFile(file, tokenOverride){
+  async function downloadDriveTemplateFile(file){
     const fileId = file.id;
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-    // Token: a Picker által adott token (ha van), különben a felső Drive bejelentkezés tokenje.
-    let accessToken = tokenOverride;
-    if(!accessToken){ accessToken = await ensureDriveUploadToken(false); }
-    if(!accessToken){ throw new Error('Nincs Drive token'); }
-    try{ window.driveAccessToken = accessToken; }catch(_){ }
+    const accessToken = driveUploadToken;
+    if(!accessToken) throw new Error("Nincs Drive token");
 
-    // Google Docs -> export DOCX, egyébként alt=media
-    const url = (mimeType === "application/vnd.google-apps.document")
-      ? ("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" +
-         encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
-      : ("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media");
+    let url;
+    const fetchOptions = {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + accessToken }
+    };
 
-    const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
-    if(!res.ok) throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+    // Google Docs -> export docx
+    if(mimeType === "application/vnd.google-apps.document"){
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    }else{
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+    }
 
+    const res = await fetch(url, fetchOptions);
+    if(!res.ok){
+      throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+    }
     const blob = await res.blob();
-    try{ window.__driveTemplateBlob = blob; }catch(_){ }
-    const arr = await blob.arrayBuffer();
-
-    // A generálás ezt ellenőrzi
+    // Drive-ról letöltött DOCX: állítsuk be a globál sablonváltozókat + építsük fel a TAG UI-t
     try{
-      window.templateArrayBuffer = arr;
-      window.templateName = name;
-    }catch(_){}
+      const arr = await blob.arrayBuffer();
 
-    // Ugyanaz a pipeline, mint a helyi fájlnál (TAG-ek + UI + mapper)
-    await loadTemplateFromArrayBuffer(arr, name);
+      // 1) Globál állapot (a generálás ezt ellenőrzi)
+      templateArrayBuffer = arr;
+      templateName = name || 'template.docx';
+      try{ window.templateArrayBuffer = templateArrayBuffer; window.templateName = templateName; }catch(_){ }
 
-    try{ log("Drive sablon betöltve és feldolgozva: "+name, "ok"); }catch(_){}
+      // 2) TAG index (ugyanaz, mint a helyi fájlnál)
+      const parsed = readTemplateFromArrayBuffer(arr);
+      currentTemplate = { parts: parsed.parts, contentTypesXml: parsed.contentTypesXml, map: parsed.map };
+
+      try{
+        window.currentTemplate = currentTemplate;
+        window.templateName = templateName;
+      }catch(_){}
+
+      // 3) UI frissítés (docName + TAG-ek)
+      const tagNames = Object.keys(currentTemplate.map || {});
+      const dn = document.getElementById('docName');
+      if(dn) dn.textContent = templateName + ` – TAG-ek: ${tagNames.length}`;
+      const tg = document.getElementById('tags');
+      if(tg) tg.innerHTML = 'Talált TAG-ek: ' + tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${currentTemplate.map[t].length}</span></span>`).join(' ');
+
+      // 4) Mapper újraépítés, ha van adattábla is
+      try{ buildMapper(); }catch(_){}
+      try{ log('Drive sablon feldolgozva: '+templateName+' • TAG-ek: '+tagNames.length,'ok'); }catch(_){}
+    }catch(err){
+      try{ log('Sablon feldolgozási hiba (Drive): '+(err && err.message ? err.message : err),'err'); }catch(_){}
+      throw err;
+    }
   }
 
 
   // --- Drive adattábla betöltés (XLSX/CSV/Google Sheets) ---
-  async function downloadDriveDataFile(file, tokenOverride){
+  async function downloadDriveDataFile(file){
     const fileId = file.id;
     const name = file.name || "drive_data.xlsx";
     const mimeType = file.mimeType || "";
 
-    let accessToken = tokenOverride;
-    if(!accessToken){ accessToken = await ensureDriveUploadToken(false); }
-    if(!accessToken){ throw new Error('Nincs Drive token'); }
-    try{ window.driveAccessToken = accessToken; }catch(_){ }
+    const accessToken = driveUploadToken;
+    if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
@@ -1541,8 +1551,7 @@ async function loadDataFromBlob(blob, filename){
       onPicked: async (doc)=>{
         try{
           updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
-          try{ window.driveAccessToken = token; }catch(_){ }
-           await downloadDriveDataFile(doc, token);
+          await downloadDriveDataFile(doc);
           updateDriveDataStatus("Adattábla betöltve Drive-ról: " + (doc.name || ""));
         }catch(err){
           console.error(err);
@@ -1578,8 +1587,7 @@ async function loadDataFromBlob(blob, filename){
       onPicked: async (doc)=>{
         try{
           updateDriveTemplateStatus("Sablon letöltése a Drive-ról...");
-          try{ window.driveAccessToken = token; }catch(_){ }
-          await downloadDriveTemplateFile(doc, token);
+          await downloadDriveTemplateFile(doc);
           updateDriveTemplateStatus("Sablon betöltve Drive-ról: " + (doc.name || ""));
         }catch(err){
           console.error(err);
@@ -2291,7 +2299,7 @@ async function listFiles(folderId, token){
         }
         const tagsEl = document.getElementById('tags');
         // ha van global templateName/currentTemplate, a korábbi logika már kitölti; itt csak fallback.
-        if(tagsEl && (!tagsEl.innerHTML || tagsEl.innerHTML.trim()==='') && !(window.currentTemplate || currentTemplate)){
+        if(tagsEl && (!tagsEl.innerHTML || tagsEl.innerHTML.trim()==='')){
           tagsEl.innerHTML = '<span class="small" style="color:var(--muted)">Sablon betöltve a Drive-ról. (TAG-ek feldolgozása folyamatban / nem elérhető.)</span>';
         }
       }
@@ -2337,8 +2345,7 @@ async function listFiles(folderId, token){
         try{
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Sablon letöltése…');
           if(typeof window.downloadDriveTemplateFile==='function') await window.downloadDriveTemplateFile(f);
-          // UI fallback csak akkor, ha a sablon feldolgozás nem állított be TAG-eket
-          if(!(window.currentTemplate || currentTemplate)) forceRefreshMainUi('template', f.name||'');
+          forceRefreshMainUi('template', f.name||'');
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Sablon betöltve: '+(f.name||''));
         }catch(err){
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Hiba: '+(err.message||String(err)));
