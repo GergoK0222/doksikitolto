@@ -1298,9 +1298,6 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
     });
   }
 
-      catch(err){ console.error(err); setDriveFolderStatus("Hiba: " + (err && err.message ? err.message : err)); }
-    });
-  }
 function driveLibsReady(){
     return (typeof google !== "undefined" &&
             google.accounts && google.accounts.oauth2 &&
