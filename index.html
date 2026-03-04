@@ -1457,7 +1457,8 @@ async function loadDataFromBlob(blob, filename){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
-    const res = await fetch(url, fetchOptions);
+        try{ console.log('[Drive download]', {id:fileId, name, mimeType, url, hasToken:!!accessToken}); }catch(_){}
+const res = await fetch(url, fetchOptions);
     if(!res.ok){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
@@ -1477,9 +1478,25 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
-    if(!accessToken) throw new Error("Nincs Drive token");
-
+// Token: több helyről próbáljuk (modal / gapi / fő login)
+    let accessToken = null;
+    try{
+      accessToken =
+        driveUploadToken ||
+        driveAccessToken ||
+        (window.driveUploadToken || window.driveAccessToken) ||
+        ((window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token) || null);
+    }catch(_){}
+    if(!accessToken){
+      // user-gesture alatt vagyunk (picker után), megpróbálunk consent flow-t
+      try{
+        if(typeof ensureDriveUploadToken === 'function'){
+          accessToken = await ensureDriveUploadToken(true);
+        }
+      }catch(_){}
+    }
+    if(!accessToken) throw new Error("Nincs Drive token (jelentkezz be a Drive-hoz, vagy engedélyezd a hozzáférést).");
+    
     let url;
     const fetchOptions = {
       method: "GET",
@@ -1493,7 +1510,8 @@ async function loadDataFromBlob(blob, filename){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
-    const res = await fetch(url, fetchOptions);
+        try{ console.log('[Drive download]', {id:fileId, name, mimeType, url, hasToken:!!accessToken}); }catch(_){}
+const res = await fetch(url, fetchOptions);
     if(!res.ok){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
@@ -1539,9 +1557,25 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_data.xlsx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
-    if(!accessToken) throw new Error("Nincs Drive token");
-
+// Token: több helyről próbáljuk (modal / gapi / fő login)
+    let accessToken = null;
+    try{
+      accessToken =
+        driveUploadToken ||
+        driveAccessToken ||
+        (window.driveUploadToken || window.driveAccessToken) ||
+        ((window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token) || null);
+    }catch(_){}
+    if(!accessToken){
+      // user-gesture alatt vagyunk (picker után), megpróbálunk consent flow-t
+      try{
+        if(typeof ensureDriveUploadToken === 'function'){
+          accessToken = await ensureDriveUploadToken(true);
+        }
+      }catch(_){}
+    }
+    if(!accessToken) throw new Error("Nincs Drive token (jelentkezz be a Drive-hoz, vagy engedélyezd a hozzáférést).");
+    
     let url;
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
       // Google Sheets -> export XLSX
@@ -2493,5 +2527,42 @@ async function listFiles(folderId, token){
   }catch(_){}
 </script>
 
+<script>
+<!-- GLOBAL_ERROR_HOOKS -->
+(function(){
+  function safeText(v){ try{ return (v && v.stack) ? String(v.stack) : String(v); }catch(_){ return String(v); } }
+  function appendLog(msg, cls){
+    try{
+      const logEl = document.getElementById('log');
+      if(!logEl) return;
+      const div = document.createElement('div');
+      div.className = 'log-line ' + (cls||'');
+      div.textContent = msg;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+    }catch(_){}
+  }
+  function setErr(msg){
+    try{
+      const errEl = document.getElementById('error');
+      if(errEl) errEl.textContent = msg;
+    }catch(_){}
+  }
+  window.addEventListener('error', (e)=>{
+    const msg = '[JS error] ' + (e && e.message ? e.message : 'Ismeretlen hiba');
+    appendLog(msg, 'err');
+    setErr(msg);
+    console.error(e.error || e);
+  });
+  window.addEventListener('unhandledrejection', (e)=>{
+    const msg = '[Unhandled promise] ' + safeText(e && e.reason ? e.reason : e);
+    appendLog(msg, 'err');
+    setErr(msg);
+    console.error(e && e.reason ? e.reason : e);
+  });
+  try{ window.__dbg = window.__dbg || {}; }catch(_){}
+  appendLog('Diagnosztika aktív ('+new Date().toISOString()+')', 'ok');
+})();
+</script>
 </body>
 </html>
