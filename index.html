@@ -485,6 +485,7 @@ async function loadTemplateFromArrayBuffer(arr, filename){
   document.getElementById('error').textContent='';
   const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(arr);
   templateArrayBuffer=arr; templateName=filename||'template.docx'; currentTemplate={parts,contentTypesXml,map};
+  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; }catch(_){}
   const tagNames=Object.keys(map);
   document.getElementById('docName').textContent=templateName+` – TAG-ek: ${tagNames.length}`;
   document.getElementById('tags').innerHTML='Talált TAG-ek: '+tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${map[t].length}</span></span>`).join(' ');
@@ -2251,6 +2252,43 @@ async function listFiles(folderId, token){
   // Expose for existing buttons
   window.openDriveBrowser = openDriveBrowser;
 
+
+
+  // UI szinkron: ha a Drive-letöltés megtörtént, de a fő felület nem frissült (pl. scope/lexical eltérés miatt),
+  // akkor itt erőből frissítjük a látható elemeket is.
+  function forceRefreshMainUi(kind, pickedName){
+    try{
+      if(kind==='template'){
+        const docNameEl = document.getElementById('docName');
+        if(docNameEl && (!docNameEl.textContent || docNameEl.textContent.trim()==='Nincs sablon')){
+          docNameEl.textContent = (pickedName||'Sablon') + ' – (Drive)';
+        }
+        const tagsEl = document.getElementById('tags');
+        // ha van global templateName/currentTemplate, a korábbi logika már kitölti; itt csak fallback.
+        if(tagsEl && (!tagsEl.innerHTML || tagsEl.innerHTML.trim()==='')){
+          tagsEl.innerHTML = '<span class="small" style="color:var(--muted)">Sablon betöltve a Drive-ról. (TAG-ek feldolgozása folyamatban / nem elérhető.)</span>';
+        }
+      }
+      if(kind==='data'){
+        const rows = (window.dataRows && Array.isArray(window.dataRows)) ? window.dataRows : null;
+        if(rows && typeof window.renderDataPreview === 'function'){
+          window.renderDataPreview(rows);
+        }else if(rows){
+          // ha a renderDataPreview nem látható globálisan, akkor legalább jelezzünk
+          const dp = document.getElementById('dataPreview');
+          if(dp && (!dp.innerHTML || dp.innerHTML.trim()==='')){
+            dp.innerHTML = '<div class="small">Adattábla betöltve (' + rows.length + ' sor). A részletes előnézet nem elérhető ebben a buildben.</div>';
+          }
+        }
+      }
+      // Mapper megjelenítése, ha mindkettő megvan
+      const mw = document.getElementById('mapperWrap');
+      if(mw && mw.style.display==='none'){
+        // a fő buildMapper() elvileg ezt kezeli; itt csak fallback
+        if(window.dataRows && window.currentTemplate){ mw.style.display='block'; }
+      }
+    }catch(_){ }
+  }
   // --- Gombok felülírása: a meglévő picker helyett a saját UI nyíljon ---
   function interceptClick(btnId, handler){
     const btn = document.getElementById(btnId);
@@ -2273,6 +2311,7 @@ async function listFiles(folderId, token){
         try{
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Sablon letöltése…');
           if(typeof window.downloadDriveTemplateFile==='function') await window.downloadDriveTemplateFile(f);
+          forceRefreshMainUi('template', f.name||'');
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Sablon betöltve: '+(f.name||''));
         }catch(err){
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Hiba: '+(err.message||String(err)));
@@ -2293,6 +2332,7 @@ async function listFiles(folderId, token){
         try{
           if(typeof window.updateDriveDataStatus==='function') window.updateDriveDataStatus('Adattábla letöltése…');
           if(typeof window.downloadDriveDataFile==='function') await window.downloadDriveDataFile(f);
+          forceRefreshMainUi('data', f.name||'');
           if(typeof window.updateDriveDataStatus==='function') window.updateDriveDataStatus('Adattábla betöltve: '+(f.name||''));
         }catch(err){
           if(typeof window.updateDriveDataStatus==='function') window.updateDriveDataStatus('Hiba: '+(err.message||String(err)));
