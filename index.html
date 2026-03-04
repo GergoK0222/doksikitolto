@@ -1463,12 +1463,34 @@ async function loadDataFromBlob(blob, filename){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
     const blob = await res.blob();
-    // Drive-ról letöltött DOCX ugyanúgy menjen át a sablon-parszolón, mint a helyi fájl
+    // Drive-ról letöltött DOCX: állítsuk be a globál sablonváltozókat + építsük fel a TAG UI-t
     try{
       const arr = await blob.arrayBuffer();
-      await loadTemplateFromArrayBuffer(arr, name);
+
+      // 1) Globál állapot (a generálás ezt ellenőrzi)
+      templateArrayBuffer = arr;
+      templateName = name || 'template.docx';
+
+      // 2) TAG index (ugyanaz, mint a helyi fájlnál)
+      const parsed = readTemplateFromArrayBuffer(arr);
+      currentTemplate = { parts: parsed.parts, contentTypesXml: parsed.contentTypesXml, map: parsed.map };
+
+      try{
+        window.currentTemplate = currentTemplate;
+        window.templateName = templateName;
+      }catch(_){}
+
+      // 3) UI frissítés (docName + TAG-ek)
+      const tagNames = Object.keys(currentTemplate.map || {});
+      const dn = document.getElementById('docName');
+      if(dn) dn.textContent = templateName + ` – TAG-ek: ${tagNames.length}`;
+      const tg = document.getElementById('tags');
+      if(tg) tg.innerHTML = 'Talált TAG-ek: ' + tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${currentTemplate.map[t].length}</span></span>`).join(' ');
+
+      // 4) Mapper újraépítés, ha van adattábla is
+      try{ buildMapper(); }catch(_){}
+      try{ log('Drive sablon feldolgozva: '+templateName+' • TAG-ek: '+tagNames.length,'ok'); }catch(_){}
     }catch(err){
-      // látható hiba + log
       try{ log('Sablon feldolgozási hiba (Drive): '+(err && err.message ? err.message : err),'err'); }catch(_){}
       throw err;
     }
