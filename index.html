@@ -485,7 +485,7 @@ async function loadTemplateFromArrayBuffer(arr, filename){
   document.getElementById('error').textContent='';
   const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(arr);
   templateArrayBuffer=arr; templateName=filename||'template.docx'; currentTemplate={parts,contentTypesXml,map};
-  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; }catch(_){}
+  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; window.templateArrayBuffer = templateArrayBuffer; }catch(_){ }
   const tagNames=Object.keys(map);
   document.getElementById('docName').textContent=templateName+` – TAG-ek: ${tagNames.length}`;
   document.getElementById('tags').innerHTML='Talált TAG-ek: '+tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${map[t].length}</span></span>`).join(' ');
@@ -1422,7 +1422,7 @@ async function loadDataFromBlob(blob, filename){
     }
   }
 
-  async function downloadDriveDataFile(file){
+  async function downloadDriveDataFile(file, tokenOverride){
     const fileId = file.id;
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
@@ -1452,14 +1452,16 @@ async function loadDataFromBlob(blob, filename){
     await loadTemplateFromArrayBuffer(arr, filename || 'template.docx');
   }
 
-  async function downloadDriveTemplateFile(file){
+  async function downloadDriveTemplateFile(file, tokenOverride){
     const fileId = file.id;
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-    // Mindig a felső "Drive bejelentkezés" tokenjét használjuk
-    const accessToken = await ensureDriveUploadToken(false);
-    if(!accessToken) throw new Error("Nincs Drive token");
+    // Token: a Picker által adott token (ha van), különben a felső Drive bejelentkezés tokenje.
+    let accessToken = tokenOverride;
+    if(!accessToken){ accessToken = await ensureDriveUploadToken(false); }
+    if(!accessToken){ throw new Error('Nincs Drive token'); }
+    try{ window.driveAccessToken = accessToken; }catch(_){ }
 
     // Google Docs -> export DOCX, egyébként alt=media
     const url = (mimeType === "application/vnd.google-apps.document")
@@ -1471,6 +1473,7 @@ async function loadDataFromBlob(blob, filename){
     if(!res.ok) throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
 
     const blob = await res.blob();
+    try{ window.__driveTemplateBlob = blob; }catch(_){ }
     const arr = await blob.arrayBuffer();
 
     // A generálás ezt ellenőrzi
@@ -1487,13 +1490,15 @@ async function loadDataFromBlob(blob, filename){
 
 
   // --- Drive adattábla betöltés (XLSX/CSV/Google Sheets) ---
-  async function downloadDriveDataFile(file){
+  async function downloadDriveDataFile(file, tokenOverride){
     const fileId = file.id;
     const name = file.name || "drive_data.xlsx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
-    if(!accessToken) throw new Error("Nincs Drive token");
+    let accessToken = tokenOverride;
+    if(!accessToken){ accessToken = await ensureDriveUploadToken(false); }
+    if(!accessToken){ throw new Error('Nincs Drive token'); }
+    try{ window.driveAccessToken = accessToken; }catch(_){ }
 
     let url;
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
@@ -1536,7 +1541,8 @@ async function loadDataFromBlob(blob, filename){
       onPicked: async (doc)=>{
         try{
           updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
-          await downloadDriveDataFile(doc);
+          try{ window.driveAccessToken = token; }catch(_){ }
+           await downloadDriveDataFile(doc, token);
           updateDriveDataStatus("Adattábla betöltve Drive-ról: " + (doc.name || ""));
         }catch(err){
           console.error(err);
@@ -1572,7 +1578,8 @@ async function loadDataFromBlob(blob, filename){
       onPicked: async (doc)=>{
         try{
           updateDriveTemplateStatus("Sablon letöltése a Drive-ról...");
-          await downloadDriveTemplateFile(doc);
+          try{ window.driveAccessToken = token; }catch(_){ }
+          await downloadDriveTemplateFile(doc, token);
           updateDriveTemplateStatus("Sablon betöltve Drive-ról: " + (doc.name || ""));
         }catch(err){
           console.error(err);
