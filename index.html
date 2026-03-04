@@ -1595,6 +1595,7 @@ async function loadDataFromBlob(blob, filename){
       <div class="modalTitle" id="dbTitle">Google Drive</div>
       <div class="dbTabs" style="margin-left:8px">
         <button type="button" class="dbTab active" data-scope="my">Saját meghajtó</button>
+        <button type="button" class="dbTab" data-scope="sharedWithMe">Velem megosztott</button>
         <button type="button" class="dbTab" data-scope="shared">Közös meghajtók</button>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
@@ -1764,7 +1765,7 @@ async function loadDataFromBlob(blob, filename){
 
   function makeBreadcrumb(){
     const parts = [];
-    parts.push({ id: (state.scope==='my'?'root':(state.driveId||'root')), name: (state.scope==='my'?'Saját meghajtó':(state.drives.find(d=>d.id===state.driveId)?.name || 'Közös meghajtó')) });
+    parts.push({ id: (state.scope==='my'?'root':(state.scope==='sharedWithMe'?'root':(state.driveId||'root'))), name: (state.scope==='my'?'Saját meghajtó':(state.scope==='sharedWithMe'?'Velem megosztott':(state.drives.find(d=>d.id===state.driveId)?.name || 'Közös meghajtó'))) });
     for(const p of state.folderPath){
       parts.push(p);
     }
@@ -1827,7 +1828,12 @@ async function loadDataFromBlob(blob, filename){
     const params = new URLSearchParams();
     params.set('pageSize','200');
     params.set('fields','files(id,name,mimeType,modifiedTime,size,iconLink),nextPageToken');
-    let q = `'${folderId}' in parents and trashed=false`;
+    let q;
+    if(state.scope==='sharedWithMe' && folderId==='root' && state.folderPath.length===0){
+      q = `sharedWithMe=true and trashed=false`;
+    }else{
+      q = `'${folderId}' in parents and trashed=false`;
+    }
     if(state.mimeAllow){
       // mimeAllow lehet több mime; OR feltétel
       const parts = state.mimeAllow.split(',').map(s=>s.trim()).filter(Boolean);
@@ -1876,7 +1882,7 @@ async function loadDataFromBlob(blob, filename){
 
   function renderTree(rootFolders){
     dbTree.innerHTML = '';
-    const rootNode = makeNode({id: state.scope==='my' ? 'root' : 'root', name: state.scope==='my' ? 'Saját meghajtó' : (state.drives.find(d=>d.id===state.driveId)?.name || 'Közös meghajtó')}, 0, true);
+    const rootNode = makeNode({id: 'root', name: state.scope==='my' ? 'Saját meghajtó' : (state.scope==='sharedWithMe' ? 'Velem megosztott' : (state.drives.find(d=>d.id===state.driveId)?.name || 'Közös meghajtó'))}, 0, true);
     dbTree.appendChild(rootNode);
     if(state.expanded.has(scopeKey()+'root')){
       const wrap = document.createElement('div');
@@ -2045,11 +2051,16 @@ async function loadDataFromBlob(blob, filename){
       dbLeftBadge.textContent = String(state.drives.length||0);
       // ha nincs kiválasztott drive, válasszuk az elsőt
       if(!state.driveId && state.drives.length) state.driveId = state.drives[0].id;
+    }else if(state.scope==='sharedWithMe'){
+      dbLeftLabel.textContent = 'Velem megosztott';
+      dbLeftBadge.style.display = 'none';
+      state.driveId = null;
     }else{
       dbLeftLabel.textContent = 'Mappák';
       dbLeftBadge.style.display = 'none';
       state.driveId = null;
     }
+
 
     // root expand default
     state.expanded.add(scopeKey()+'root');
@@ -2077,6 +2088,18 @@ async function loadDataFromBlob(blob, filename){
       });
 
       // list root content of drive
+      state.currentFolder = 'root';
+      state.folderPath = [];
+      makeBreadcrumb();
+      await renderList();
+      return;
+    }
+
+    // sharedWithMe tree
+    if(state.scope==='sharedWithMe'){
+      // bal oldali fa: a velem megosztott mappák (gyökérben)
+      const sharedFolders = await listSharedWithMeRootFolders(token);
+      renderTree(sharedFolders);
       state.currentFolder = 'root';
       state.folderPath = [];
       makeBreadcrumb();
