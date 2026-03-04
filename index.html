@@ -1429,6 +1429,7 @@ async function loadDataFromBlob(blob, filename){
     }
 
     const res = await fetch(url, fetchOptions);
+    try{ console.log("[Drive] template download:", res.status, res.statusText, url); }catch(_){ }
     if(!res.ok){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
@@ -1451,6 +1452,7 @@ async function loadDataFromBlob(blob, filename){
     const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
     if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; }catch(_){ }
     if(!accessToken) throw new Error("Nincs Drive token");
+    try{ console.log("[Drive] template pick:", {fileId,name,mimeType, hasToken:!!accessToken}); }catch(_){ }
 
     let url;
     const fetchOptions = {
@@ -1478,6 +1480,7 @@ async function loadDataFromBlob(blob, filename){
       templateArrayBuffer = arr;
       templateName = name || 'template.docx';
       try{ window.templateArrayBuffer = arr; window.templateName = templateName; }catch(_){ }
+      try{ console.log("[Drive] template bytes:", arr.byteLength); }catch(_){ }
 
       // 2) TAG index (ugyanaz, mint a helyi fájlnál)
       const parsed = readTemplateFromArrayBuffer(arr);
