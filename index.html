@@ -1889,7 +1889,7 @@ async function listFiles(folderId, token){
     let url = 'https://www.googleapis.com/drive/v3/files?';
     const params = new URLSearchParams();
     params.set('pageSize','200');
-    params.set('fields','files(id,name,mimeType,modifiedTime,size,iconLink),nextPageToken');
+    params.set('fields','files(id,name,mimeType,modifiedTime,size,iconLink,webViewLink),nextPageToken');
     let q;
     if(state.scope==='sharedWithMe' && folderId==='root' && state.folderPath.length===0){
       q = `sharedWithMe=true and trashed=false`;
@@ -1897,11 +1897,12 @@ async function listFiles(folderId, token){
       q = `'${folderId}' in parents and trashed=false`;
     }
     if(state.mimeAllow){
-      // mimeAllow lehet több mime; OR feltétel
+      // mimeAllow lehet több mime; OR feltétel.
+      // FONTOS: a mappákat mindig engedjük, különben nem lehet navigálni a könyvtárakban.
       const parts = state.mimeAllow.split(',').map(s=>s.trim()).filter(Boolean);
       if(parts.length){
         const cond = parts.map(m=>`mimeType='${m}'`).join(' or ');
-        q += ` and (${cond})`;
+        q += ` and (mimeType='${MIME_FOLDER}' or (${cond}))`;
       }
     }
     params.set('q', q);
@@ -2076,7 +2077,27 @@ async function listFiles(folderId, token){
         dbPreviewBody.innerHTML = '<div class="small err">Előnézet hiba: '+(err.message||String(err))+'</div>';
       }
     }else{
-      dbPreviewBody.innerHTML = '<div class="small" style="color:var(--muted);text-align:center">Nincs előnézet ehhez a fájltípushoz.</div>';
+      // Nem-kép fájloknál is mutassunk hasznos infót (és Drive linket), hogy egyértelmű legyen: a fájl kiválasztható.
+      const typeLine = (()=> {
+        const mt = (f.mimeType||'');
+        if(mt===MIME_FOLDER) return 'Mappa';
+        if(mt==='application/vnd.google-apps.document' || mt.includes('wordprocessingml')) return 'Dokumentum';
+        if(mt==='application/vnd.google-apps.spreadsheet' || mt.includes('spreadsheet') || mt.includes('excel')) return 'Táblázat';
+        if(mt.includes('pdf')) return 'PDF';
+        return 'Fájl';
+      })();
+      const href = f.webViewLink || ('https://drive.google.com/file/d/' + encodeURIComponent(f.id) + '/view');
+      const safeName = (f.name||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      dbPreviewBody.innerHTML =
+        '<div class="small" style="display:flex;flex-direction:column;gap:8px">' +
+          '<div><b>' + safeName + '</b></div>' +
+          '<div style="color:var(--muted)">' + typeLine +
+            (f.modifiedTime ? (' • ' + fmtDate(f.modifiedTime)) : '') +
+            (f.size ? (' • ' + fmtSize(f.size)) : '') +
+          '</div>' +
+          '<div class="small" style="color:var(--muted)">Itt csak képekhez van beágyazott előnézet. Ettől még kiválasztható a fájl.</div>' +
+          '<div><a class="ghostBtn" href="' + href + '" target="_blank" rel="noopener noreferrer">Megnyitás Drive-ban</a></div>' +
+        '</div>';
     }
   }
 
