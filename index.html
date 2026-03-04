@@ -997,6 +997,19 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
   let drivePickerLoaded = false;
   let driveFolderId = null;
 
+  // --- Token szinkron (a Drive böngésző modal külön scope-ban fut, ezért window-n keresztül egységesítünk) ---
+  function setDriveTokens(at){
+    if(!at) return;
+    driveAccessToken = at;
+    driveUploadToken = at;
+    try{ window.driveAccessToken = at; window.driveUploadToken = at; }catch(_){}
+            try{ if(window.__setDriveTokens) window.__setDriveTokens(at); }catch(_){}
+    try{ if(window.gapi && gapi.client && typeof gapi.client.setToken === "function"){ gapi.client.setToken({access_token: at}); } }catch(_){}
+  }
+  // Drive böngésző és egyéb modulok hívhatják
+  try{ window.__setDriveTokens = setDriveTokens; }catch(_){}
+
+
   
 
   // Egy token kliens az összes Drive művelethez
@@ -1345,8 +1358,21 @@ function driveLibsReady(){
     return new Promise((resolve,reject)=>{
       // Egységes token: a felső "Drive bejelentkezés" gomb tölti be.
       // Itt NEM indítunk automatikus bejelentkezést / consent flow-t.
+
+      // 0) Ha a modal / másik modul már window.* alá tette a tokent, szinkronizáljuk vissza.
+      try{
+        const wtok = window.driveAccessToken || window.driveUploadToken;
+        if(wtok){ setDriveTokens(wtok); resolve(driveUploadToken); return; }
+      }catch(_){}
+
+      // 1) Ha a gapi kliensben van token, használjuk.
+      try{
+        const gtok = (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token) || null;
+        if(gtok){ setDriveTokens(gtok); resolve(driveUploadToken); return; }
+      }catch(_){}
+
       if(driveUploadToken){ resolve(driveUploadToken); return; }
-      if(driveAccessToken){ driveUploadToken = driveAccessToken; try{ window.driveAccessToken = driveAccessToken; window.driveUploadToken = driveUploadToken; }catch(_){} resolve(driveUploadToken); return; }
+      if(driveAccessToken){ setDriveTokens(driveAccessToken); resolve(driveUploadToken); return; }
 
       // Ha valaki mégis explicit promptot kér (pl. a felső gomb), akkor kérhetünk tokent:
       if(promptMode){
@@ -1722,13 +1748,13 @@ async function loadDataFromBlob(blob, filename){
     // 1) már meglévő tokenek (fő kódból)
     try{
       const t1 = window.driveAccessToken || window.driveUploadToken;
-      if(t1) return t1;
+      if(t1){ try{ if(window.__setDriveTokens) window.__setDriveTokens(t1); }catch(_){ } return t1; }
     }catch(_){}
 
     // 2) ha a fő kód publikálta a token helperét, használjuk
     if(typeof window.ensureDriveUploadToken === 'function'){
       let t = await window.ensureDriveUploadToken(false);
-      if(t) return t;
+      if(t){ try{ if(window.__setDriveTokens) window.__setDriveTokens(t); }catch(_){ } return t; }
 
       // ha van beléptető helper, próbáljuk meg (ez is user-gesture alatt fut)
       if(typeof window.driveSignIn === 'function'){
