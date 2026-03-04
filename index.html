@@ -1782,11 +1782,6 @@ async function loadDataFromBlob(blob, filename){
     return token;
   }
 
-    // fallback: driveAccessToken globál (ha látszik)
-    if(window.driveAccessToken) return window.driveAccessToken;
-    throw new Error('Nincs Drive token. Jelentkezz be felül a "Drive bejelentkezés" gombbal.');
-  }
-
   async function driveFetchJson(url, token){
     const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token }});
     if(!res.ok){
