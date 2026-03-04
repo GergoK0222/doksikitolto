@@ -1033,9 +1033,7 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 
   // A sablon- és adattábla-picker ugyanazt a tokent használja
   async function ensureDriveDataToken(){
-    const t = await ensureDriveUploadToken(false);
-    if(t) setDriveTokens(t);
-    return t;
+    return await ensureDriveUploadToken(false);
   }
 
 
@@ -1275,7 +1273,6 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
     await ensureGapiLoadedForData();
     await ensureDrivePicker();
     const token = await ensureDriveDataToken();
-    if(token) setDriveTokens(token);
     if(!token){
       setDriveFolderStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
       return;
@@ -1440,14 +1437,16 @@ async function loadDataFromBlob(blob, filename){
     const fileId = file.id;
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
-    // Token: próbáljuk minden lehetséges helyről, és ha nincs, kérjünk (consent)
-    let accessToken = driveUploadToken || driveAccessToken || (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
-    if(!accessToken){
-      try{ await ensureDriveUploadToken(true); }catch(_){ }
-      accessToken = driveUploadToken || driveAccessToken || (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
-    }
-    if(!accessToken) throw new Error("Nincs Drive token");
+    // Token: egységesen kérjük le/szinkronizáljuk (ne indítsunk popupot innen, mert a böngésző blokkolhatja)
+const accessToken = await (typeof ensureDriveUploadToken === "function" ? ensureDriveUploadToken(false) : Promise.resolve(null))
+  || driveUploadToken || driveAccessToken
+  || (typeof window !== "undefined" ? (window.driveUploadToken || window.driveAccessToken || window.driveAccessToken) : null)
+  || (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
 
+if(!accessToken){
+  throw new Error("Nincs Drive token. Kattints felül a „Drive bejelentkezés” gombra, majd próbáld újra.");
+}
+try{ if(typeof setDriveTokens === "function") setDriveTokens(accessToken); }catch(_){}
     let url;
     let fetchOptions = {
       method: "GET",
@@ -1481,26 +1480,18 @@ const res = await fetch(url, fetchOptions);
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-// Token: több helyről próbáljuk (modal / gapi / fő login)
-    let accessToken = null;
-    try{
-      accessToken =
-        driveUploadToken ||
-        driveAccessToken ||
-        (window.driveUploadToken || window.driveAccessToken) ||
-        ((window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token) || null);
-    }catch(_){}
-    if(!accessToken){
-      // user-gesture alatt vagyunk (picker után), megpróbálunk consent flow-t
-      try{
-        if(typeof ensureDriveUploadToken === 'function'){
-          accessToken = await ensureDriveUploadToken(true);
-        }
-      }catch(_){}
-    }
-    if(!accessToken) throw new Error("Nincs Drive token (jelentkezz be a Drive-hoz, vagy engedélyezd a hozzáférést).");
-    
-    let url;
+// Token: egységesen kérjük le/szinkronizáljuk (ne indítsunk popupot innen, mert a böngésző blokkolhatja)
+const accessToken = await (typeof ensureDriveUploadToken === "function" ? ensureDriveUploadToken(false) : Promise.resolve(null))
+  || driveUploadToken || driveAccessToken
+  || (typeof window !== "undefined" ? (window.driveUploadToken || window.driveAccessToken || window.driveAccessToken) : null)
+  || (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
+
+if(!accessToken){
+  throw new Error("Nincs Drive token. Kattints felül a „Drive bejelentkezés” gombra, majd próbáld újra.");
+}
+try{ if(typeof setDriveTokens === "function") setDriveTokens(accessToken); }catch(_){}
+
+let url;
     const fetchOptions = {
       method: "GET",
       headers: { "Authorization": "Bearer " + accessToken }
@@ -1600,7 +1591,6 @@ const res = await fetch(url, fetchOptions);
     await ensureGapiLoadedForData();
     await ensureDrivePicker();
     const token = await ensureDriveDataToken();
-    if(token) setDriveTokens(token);
     if(!token){
       updateDriveDataStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
       return;
