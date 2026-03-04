@@ -1412,7 +1412,8 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
+    const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
+    if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; }catch(_){ }
     if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
@@ -1447,7 +1448,8 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
+    const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
+    if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; }catch(_){ }
     if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
