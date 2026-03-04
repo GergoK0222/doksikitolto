@@ -1407,6 +1407,34 @@ async function loadDataFromBlob(blob, filename){
     }
   }
 
+  async function downloadDriveDataFile(file){
+    const fileId = file.id;
+    const name = file.name || "drive_data";
+    const mimeType = file.mimeType || "";
+
+    const accessToken = driveUploadToken;
+    if(!accessToken) throw new Error("Nincs Drive token");
+
+    let url;
+    let fetchOptions = {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + accessToken }
+    };
+
+    if(mimeType === "application/vnd.google-apps.spreadsheet"){
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }else{
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+    }
+
+    const res = await fetch(url, fetchOptions);
+    if(!res.ok){
+      throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
+    }
+    const blob = await res.blob();
+    await loadDataFromBlob(blob, name);
+  }
+
   // ----- Google Drive sablon (.docx) betöltés -----
   async function loadTemplateFromBlob(blob, filename){
     if(!blob) return;
@@ -1419,8 +1447,7 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
-    if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; window.driveUploadToken = driveUploadToken; }catch(_){ }
+    const accessToken = driveUploadToken;
     if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
@@ -1431,9 +1458,9 @@ async function loadDataFromBlob(blob, filename){
 
     // Google Docs -> export docx
     if(mimeType === "application/vnd.google-apps.document"){
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document") + "&supportsAllDrives=true";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
     }
 
     const res = await fetch(url, fetchOptions);
@@ -1482,17 +1509,16 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_data.xlsx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
-    if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; window.driveUploadToken = driveUploadToken; }catch(_){ }
+    const accessToken = driveUploadToken;
     if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
       // Google Sheets -> export XLSX
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" +
-            encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") + "&supportsAllDrives=true";
+            encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
     }
 
     const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
@@ -1693,30 +1719,72 @@ async function loadDataFromBlob(blob, filename){
 
   // A fő kódban már létező token getterre támaszkodunk.
   async function getTokenOrThrow(){
-    // 1) próbáljuk a meglévő (silent) tokent
+    // 1) már meglévő tokenek (fő kódból)
+    try{
+      const t1 = window.driveAccessToken || window.driveUploadToken;
+      if(t1) return t1;
+    }catch(_){}
+
+    // 2) ha a fő kód publikálta a token helperét, használjuk
     if(typeof window.ensureDriveUploadToken === 'function'){
       let t = await window.ensureDriveUploadToken(false);
       if(t) return t;
 
-      // 2) ha nincs token, próbáljunk beléptetni (ha van ilyen helper), majd kérjünk tokent
-      try{
-        if(typeof window.driveSignIn === 'function'){
-          // a fő UI gomb ezt hívja; itt csak ugyanazt indítjuk el
+      // ha van beléptető helper, próbáljuk meg (ez is user-gesture alatt fut)
+      if(typeof window.driveSignIn === 'function'){
+        try{
           await window.driveSignIn();
           t = await window.ensureDriveUploadToken(false);
           if(t) return t;
-        }
-      }catch(_){ /* majd lejjebb próbálunk consentet */ }
+        }catch(_){}
+      }
 
-      // 3) végső próbálkozás: consent flow (régi picker ezt kvázi automatikusan intézte)
-      t = await window.ensureDriveUploadToken(true);
-      if(t) return t;
+      // consent flow (ha a helper támogatja)
+      try{
+        t = await window.ensureDriveUploadToken(true);
+        if(t) return t;
+      }catch(_){}
     }
 
-    // 4) fallback: ha a fő kód már kitette globalba
-    if(window.driveAccessToken) return window.driveAccessToken;
+    // 3) fallback: saját GIS tokenkérés a Drive Browser-hez (független a fő kódtól)
+    const clientId = (window.DRIVE_CLIENT_ID || (typeof DRIVE_CLIENT_ID!=='undefined' ? DRIVE_CLIENT_ID : null));
+    const scope = (window.DRIVE_SCOPE || (typeof DRIVE_SCOPE!=='undefined' ? DRIVE_SCOPE : null) ||
+                   "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly");
+    if(!clientId || !(window.google && google.accounts && google.accounts.oauth2)){
+      throw new Error('Nincs Drive token. Kattints felül a „Drive bejelentkezés” gombra, majd próbáld újra.');
+    }
 
-    throw new Error('Nincs Drive token. Engedélyezd a hozzáférést (felugró ablak), vagy kattints felül a "Drive bejelentkezés" gombra.');
+    if(!window.__driveBrowserTokenClient){
+      window.__driveBrowserTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope,
+        callback: ()=>{}
+      });
+    }
+
+    const token = await new Promise((resolve, reject)=>{
+      try{
+        window.__driveBrowserTokenClient.callback = (resp)=>{
+          if(resp && resp.error) { reject(new Error(resp.error)); return; }
+          const at = resp && resp.access_token;
+          if(at){
+            try{ window.driveAccessToken = at; window.driveUploadToken = at; }catch(_){}
+            resolve(at);
+          }else{
+            reject(new Error('Nem érkezett access_token.'));
+          }
+        };
+        // prompt: '' -> ha van session, nem dob fel consentet; ha nincs, akkor úgyis user interakcióból jön
+        window.__driveBrowserTokenClient.requestAccessToken({ prompt: "" });
+      }catch(err){ reject(err); }
+    });
+
+    return token;
+  }
+
+    // fallback: driveAccessToken globál (ha látszik)
+    if(window.driveAccessToken) return window.driveAccessToken;
+    throw new Error('Nincs Drive token. Jelentkezz be felül a "Drive bejelentkezés" gombbal.');
   }
 
   async function driveFetchJson(url, token){
