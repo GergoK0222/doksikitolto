@@ -1183,30 +1183,44 @@ function driveLibsReady(){
   function ensureDriveUploadToken(promptMode){
     return new Promise((resolve,reject)=>{
       // Egységes token: a felső "Drive bejelentkezés" gomb tölti be.
-      // Itt NEM indítunk automatikus bejelentkezést / consent flow-t.
+      // Ha van már token, azonnal visszaadjuk.
       if(driveUploadToken){ resolve(driveUploadToken); return; }
       if(driveAccessToken){ driveUploadToken = driveAccessToken; resolve(driveUploadToken); return; }
 
-      // Ha valaki mégis explicit promptot kér (pl. a felső gomb), akkor kérhetünk tokent:
-      if(promptMode){
-        if(!driveTokenClient){
-          reject(new Error("A Drive token kliens nincs inicializálva (GIS)."));
-          return;
-        }
+      if(!driveTokenClient){
+        // Ha nincs token kliens, prompt nélkül nem tudunk tokent kérni.
+        if(promptMode) reject(new Error("A Drive token kliens nincs inicializálva (GIS)."));
+        else resolve(null);
+        return;
+      }
+
+      // Token kérés helper
+      const request = (promptValue)=>{
         driveTokenClient.callback = (resp)=>{
           if(resp && resp.error){
             reject(new Error(resp.error));
             return;
           }
-          driveAccessToken = resp.access_token;
-          driveUploadToken = driveAccessToken;
-          resolve(driveUploadToken);
+          if(resp && resp.access_token){
+            driveAccessToken = resp.access_token;
+            driveUploadToken = driveAccessToken;
+            resolve(driveUploadToken);
+          }else{
+            resolve(null);
+          }
         };
-        driveTokenClient.requestAccessToken({ prompt: "consent" });
+        driveTokenClient.requestAccessToken({ prompt: promptValue });
+      };
+
+      // promptMode=true: biztosan kérünk consentet (felső gomb).
+      if(promptMode){
+        request("consent");
         return;
       }
 
-      resolve(null);
+      // promptMode=false: "csendes" token frissítés, ha a user már engedélyezte korábban.
+      // Ez javítja azt az esetet, amikor az oldal frissül / token lejár, és a gombok "némán" nem működnek.
+      request("");
     });
   }
 
@@ -1245,18 +1259,18 @@ async function loadDataFromBlob(blob, filename){
     }
   }
 
-  async function downloadDriveDataFile(file){
+  async function downloadDriveDataFile(file, accessToken){
     const fileId = file.id;
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
-    if(!accessToken) throw new Error("Nincs Drive token");
+      const token = accessToken || driveUploadToken || driveAccessToken;
+    if(!token) throw new Error("Nincs Drive token");
 
     let url;
     let fetchOptions = {
       method: "GET",
-      headers: { "Authorization": "Bearer " + accessToken }
+      headers: { "Authorization": "Bearer " + token }
     };
 
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
@@ -1280,18 +1294,18 @@ async function loadDataFromBlob(blob, filename){
     await loadTemplateFromArrayBuffer(arr, filename || 'template.docx');
   }
 
-  async function downloadDriveTemplateFile(file){
+  async function downloadDriveTemplateFile(file, accessToken){
     const fileId = file.id;
     const name = file.name || "drive_template.docx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = driveUploadToken;
-    if(!accessToken) throw new Error("Nincs Drive token");
+      const token = accessToken || driveUploadToken || driveAccessToken;
+    if(!token) throw new Error("Nincs Drive token");
 
     let url;
     const fetchOptions = {
       method: "GET",
-      headers: { "Authorization": "Bearer " + accessToken }
+      headers: { "Authorization": "Bearer " + token }
     };
 
     // Google Docs -> export docx
@@ -1333,7 +1347,7 @@ async function loadDataFromBlob(blob, filename){
           if(!doc) return;
           try{
             updateDriveTemplateStatus("Sablon letöltése a Drive-ról...");
-            await downloadDriveTemplateFile(doc);
+            await downloadDriveTemplateFile(doc, token);
             updateDriveTemplateStatus("Sablon betöltve Drive-ról: "+(doc.name||""));
           }catch(err){
             console.error(err);
@@ -1372,7 +1386,7 @@ async function loadDataFromBlob(blob, filename){
           if(!doc) return;
           try{
             updateDriveDataStatus("Adattábla letöltése a Drive-ról...");
-            await downloadDriveDataFile(doc);
+            await downloadDriveDataFile(doc, token);
             updateDriveDataStatus("Adattábla beolvasva a Drive-ról: "+(doc.name||""));
           }catch(err){
             console.error(err);
