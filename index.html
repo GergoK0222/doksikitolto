@@ -1693,13 +1693,30 @@ async function loadDataFromBlob(blob, filename){
 
   // A fő kódban már létező token getterre támaszkodunk.
   async function getTokenOrThrow(){
+    // 1) próbáljuk a meglévő (silent) tokent
     if(typeof window.ensureDriveUploadToken === 'function'){
-      const t = await window.ensureDriveUploadToken(false);
+      let t = await window.ensureDriveUploadToken(false);
+      if(t) return t;
+
+      // 2) ha nincs token, próbáljunk beléptetni (ha van ilyen helper), majd kérjünk tokent
+      try{
+        if(typeof window.driveSignIn === 'function'){
+          // a fő UI gomb ezt hívja; itt csak ugyanazt indítjuk el
+          await window.driveSignIn();
+          t = await window.ensureDriveUploadToken(false);
+          if(t) return t;
+        }
+      }catch(_){ /* majd lejjebb próbálunk consentet */ }
+
+      // 3) végső próbálkozás: consent flow (régi picker ezt kvázi automatikusan intézte)
+      t = await window.ensureDriveUploadToken(true);
       if(t) return t;
     }
-    // fallback: driveAccessToken globál (ha látszik)
+
+    // 4) fallback: ha a fő kód már kitette globalba
     if(window.driveAccessToken) return window.driveAccessToken;
-    throw new Error('Nincs Drive token. Jelentkezz be felül a "Drive bejelentkezés" gombbal.');
+
+    throw new Error('Nincs Drive token. Engedélyezd a hozzáférést (felugró ablak), vagy kattints felül a "Drive bejelentkezés" gombra.');
   }
 
   async function driveFetchJson(url, token){
