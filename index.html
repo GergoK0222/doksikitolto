@@ -1463,7 +1463,15 @@ async function loadDataFromBlob(blob, filename){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
     const blob = await res.blob();
-    await loadTemplateFromBlob(blob, name);
+    // Drive-ról letöltött DOCX ugyanúgy menjen át a sablon-parszolón, mint a helyi fájl
+    try{
+      const arr = await blob.arrayBuffer();
+      await loadTemplateFromArrayBuffer(arr, name);
+    }catch(err){
+      // látható hiba + log
+      try{ log('Sablon feldolgozási hiba (Drive): '+(err && err.message ? err.message : err),'err'); }catch(_){}
+      throw err;
+    }
   }
 
 
