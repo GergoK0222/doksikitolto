@@ -1819,7 +1819,32 @@ async function loadDataFromBlob(blob, filename){
     return folders;
   }
 
-  async function listFiles(folderId, token){
+  
+  // Velem megosztott (Shared with me) gyökér mappák a bal oldali fához
+  async function listSharedWithMeRootFolders(token){
+    const key = scopeKey()+'sharedWithMeRootFolders';
+    if(state.childrenFolders.has(key)) return state.childrenFolders.get(key);
+
+    let url = 'https://www.googleapis.com/drive/v3/files?';
+    const params = new URLSearchParams();
+    params.set('pageSize','200');
+    params.set('fields','files(id,name,mimeType,modifiedTime),nextPageToken');
+    // A Drive query nyelvben a sharedWithMe=true a "Velem megosztott" elemeket adja.
+    // Itt csak a mappákat kérjük.
+    params.set('q', `sharedWithMe=true and trashed=false and mimeType='${MIME_FOLDER}'`);
+    params.set('orderBy','name');
+    params.set('supportsAllDrives','true');
+    params.set('includeItemsFromAllDrives','true');
+    params.set('corpora','user');
+
+    url += params.toString();
+    const json = await driveFetchJson(url, token);
+    const folders = (json.files||[]).sort((a,b)=>(a.name||'').localeCompare(b.name||'', 'hu'));
+    state.childrenFolders.set(key, folders);
+    return folders;
+  }
+
+async function listFiles(folderId, token){
     const qtxt = (state.search||'').trim().toLowerCase();
     const cacheKey = scopeKey()+folderId+'|'+qtxt+'|'+state.sort+'|'+(state.mimeAllow||'');
     if(state.childrenFiles.has(cacheKey)) return state.childrenFiles.get(cacheKey);
