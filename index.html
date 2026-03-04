@@ -1381,6 +1381,7 @@ async function loadDataFromBlob(blob, filename){
       // IDE: a Drive-ról betöltött adat menjen ugyanabba, amit a generálás használ
       if(name.endsWith('.xlsx')||name.endsWith('.xls')){
         const arr = await blob.arrayBuffer();
+      try{ log('[Drive] sablon bytes: '+(arr && arr.byteLength ? arr.byteLength : 'n/a'),''); }catch(_){}
         const XLSXlib = window.XLSX || (typeof XLSX!=='undefined' ? XLSX : null);
         if(!XLSXlib) throw new Error('XLSX könyvtár nem érhető el (Drive XLSX beolvasás).');
         const wb = XLSXlib.read(arr,{type:'array'});
@@ -1428,12 +1429,13 @@ async function loadDataFromBlob(blob, filename){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
+    try{ log('[Drive] sablon letöltés: '+url,''); }catch(_){}
     const res = await fetch(url, fetchOptions);
-    try{ console.log("[Drive] template download:", res.status, res.statusText, url); }catch(_){ }
     if(!res.ok){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
     const blob = await res.blob();
+    try{ log('[Drive] sablon blob méret: '+(blob && blob.size ? blob.size : 'n/a'),''); }catch(_){}
     await loadDataFromBlob(blob, name);
   }
 
@@ -1441,6 +1443,7 @@ async function loadDataFromBlob(blob, filename){
   async function loadTemplateFromBlob(blob, filename){
     if(!blob) return;
     const arr = await blob.arrayBuffer();
+      try{ log('[Drive] sablon bytes: '+(arr && arr.byteLength ? arr.byteLength : 'n/a'),''); }catch(_){}
     await loadTemplateFromArrayBuffer(arr, filename || 'template.docx');
   }
 
@@ -1452,7 +1455,6 @@ async function loadDataFromBlob(blob, filename){
     const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
     if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; }catch(_){ }
     if(!accessToken) throw new Error("Nincs Drive token");
-    try{ console.log("[Drive] template pick:", {fileId,name,mimeType, hasToken:!!accessToken}); }catch(_){ }
 
     let url;
     const fetchOptions = {
@@ -1467,20 +1469,22 @@ async function loadDataFromBlob(blob, filename){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
+    try{ log('[Drive] sablon letöltés: '+url,''); }catch(_){}
     const res = await fetch(url, fetchOptions);
     if(!res.ok){
       throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
     }
     const blob = await res.blob();
+    try{ log('[Drive] sablon blob méret: '+(blob && blob.size ? blob.size : 'n/a'),''); }catch(_){}
     // Drive-ról letöltött DOCX: állítsuk be a globál sablonváltozókat + építsük fel a TAG UI-t
     try{
       const arr = await blob.arrayBuffer();
+      try{ log('[Drive] sablon bytes: '+(arr && arr.byteLength ? arr.byteLength : 'n/a'),''); }catch(_){}
 
       // 1) Globál állapot (a generálás ezt ellenőrzi)
       templateArrayBuffer = arr;
       templateName = name || 'template.docx';
       try{ window.templateArrayBuffer = arr; window.templateName = templateName; }catch(_){ }
-      try{ console.log("[Drive] template bytes:", arr.byteLength); }catch(_){ }
 
       // 2) TAG index (ugyanaz, mint a helyi fájlnál)
       const parsed = readTemplateFromArrayBuffer(arr);
@@ -1514,8 +1518,9 @@ async function loadDataFromBlob(blob, filename){
     const name = file.name || "drive_data.xlsx";
     const mimeType = file.mimeType || "";
 
-    const accessToken = (driveAccessToken || driveUploadToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
+    const accessToken = (driveAccessToken || driveUploadToken || driveDataToken || (gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token));
     if(accessToken && !driveUploadToken) try{ driveUploadToken = accessToken; }catch(_){ }
+    if(accessToken && !driveAccessToken) try{ driveAccessToken = accessToken; }catch(_){ }
     if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
@@ -1527,10 +1532,12 @@ async function loadDataFromBlob(blob, filename){
       url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
+    try{ log('[Drive] adattábla letöltés: '+url,''); }catch(_){}
     const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
     if(!res.ok) throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
 
     const blob = await res.blob();
+    try{ log('[Drive] sablon blob méret: '+(blob && blob.size ? blob.size : 'n/a'),''); }catch(_){}
     await loadDataFromBlob(blob, name);
   }
 
@@ -2073,6 +2080,7 @@ async function listFiles(folderId, token){
         const res = await fetch(url, { headers:{ Authorization:'Bearer '+token }});
         if(!res.ok) throw new Error('Kép letöltése sikertelen ('+res.status+')');
         const blob = await res.blob();
+    try{ log('[Drive] sablon blob méret: '+(blob && blob.size ? blob.size : 'n/a'),''); }catch(_){}
         const objUrl = URL.createObjectURL(blob);
         dbPreviewBody.innerHTML = '';
         const img = document.createElement('img');
