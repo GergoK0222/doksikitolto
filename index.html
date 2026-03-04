@@ -1231,7 +1231,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
 
   // Google Drawing export
   if(mime === "application/vnd.google-apps.drawing"){
-    const exp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=image/png`,{
+    const exp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?supportsAllDrives=true&mimeType=image/png`,{
       headers:{ Authorization: "Bearer " + token }
     });
     if(!exp.ok) throw new Error("Drive export hiba: " + exp.status);
@@ -1437,8 +1437,12 @@ async function loadDataFromBlob(blob, filename){
     const fileId = file.id;
     const name = file.name || "drive_data";
     const mimeType = file.mimeType || "";
-
-    const accessToken = driveUploadToken;
+    // Token: próbáljuk minden lehetséges helyről, és ha nincs, kérjünk (consent)
+    let accessToken = driveUploadToken || driveAccessToken || (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
+    if(!accessToken){
+      try{ await ensureDriveUploadToken(true); }catch(_){ }
+      accessToken = driveUploadToken || driveAccessToken || (window.gapi && gapi.client && gapi.client.getToken && (gapi.client.getToken()||{}).access_token);
+    }
     if(!accessToken) throw new Error("Nincs Drive token");
 
     let url;
@@ -1448,9 +1452,9 @@ async function loadDataFromBlob(blob, filename){
     };
 
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?supportsAllDrives=true&mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
     const res = await fetch(url, fetchOptions);
@@ -1484,9 +1488,9 @@ async function loadDataFromBlob(blob, filename){
 
     // Google Docs -> export docx
     if(mimeType === "application/vnd.google-apps.document"){
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?supportsAllDrives=true&mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
     const res = await fetch(url, fetchOptions);
@@ -1541,10 +1545,10 @@ async function loadDataFromBlob(blob, filename){
     let url;
     if(mimeType === "application/vnd.google-apps.spreadsheet"){
       // Google Sheets -> export XLSX
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?mimeType=" +
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"/export?supportsAllDrives=true&mimeType=" +
             encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }else{
-      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
+      url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true";
     }
 
     const res = await fetch(url, { method:"GET", headers:{ "Authorization":"Bearer "+accessToken } });
