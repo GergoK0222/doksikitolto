@@ -485,7 +485,7 @@ async function loadTemplateFromArrayBuffer(arr, filename){
   document.getElementById('error').textContent='';
   const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(arr);
   templateArrayBuffer=arr; templateName=filename||'template.docx'; currentTemplate={parts,contentTypesXml,map};
-  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; window.templateArrayBuffer = templateArrayBuffer; }catch(_){ }
+  try{ window.currentTemplate = currentTemplate; window.templateName = templateName; }catch(_){}
   const tagNames=Object.keys(map);
   document.getElementById('docName').textContent=templateName+` – TAG-ek: ${tagNames.length}`;
   document.getElementById('tags').innerHTML='Talált TAG-ek: '+tagNames.sort().map(t=>`<span class="pill">${t}<span class="badge">×${map[t].length}</span></span>`).join(' ');
@@ -681,13 +681,19 @@ document.getElementById('imgZipInput').addEventListener('change', async e=>{ con
 
 document.getElementById('gen').addEventListener('click', async ()=>{
   try{
-    const tplBuf = window.templateArrayBuffer || templateArrayBuffer;
-    const tpl = window.currentTemplate || currentTemplate;
-    if(!tplBuf||!tpl) throw new Error('Nincs betöltött sablon.');
+    // Drive-os betöltésnél előfordulhat, hogy a globál állapot window.* alatt van;
+    // a generálás mindig ezeket tekintse forrásnak.
+    const tplArr = (window.templateArrayBuffer || templateArrayBuffer);
+    const tplObj = (window.currentTemplate || currentTemplate);
+    if(!tplArr || !tplObj) throw new Error('Nincs betöltött sablon.');
+    // Szinkronizáljuk a lokális változókat is, hogy a további kód egységesen működjön.
+    templateArrayBuffer = tplArr;
+    currentTemplate = tplObj;
+
     if(!dataRows.length) throw new Error('Nincs betöltött adattábla vagy üres.');
-    const tagNames=Object.keys(tpl.map);
+    const tagNames=Object.keys(currentTemplate.map);
     for(let i=0;i<dataRows.length;i++){
-      const row=dataRows[i]; const workZip=new PizZip(tplBuf); const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(tplBuf);
+      const row=dataRows[i]; const workZip=new PizZip(templateArrayBuffer); const {parts,contentTypesXml,map}=readTemplateFromArrayBuffer(templateArrayBuffer);
       const wNS="http://schemas.openxmlformats.org/wordprocessingml/2006/main"; const aNS="http://schemas.openxmlformats.org/drawingml/2006/main"; const rNS="http://schemas.openxmlformats.org/officeDocument/2006/relationships";
       const groupSource={}; Object.entries(tagGroup).forEach(([k,g])=>{ if(g) groupSource[g]=groupSource[g]||null; }); for(const [k,g] of Object.entries(tagGroup)){ if(g&&mapping[k]) groupSource[g]=mapping[k]; }
       for(const tag of tagNames){
@@ -1473,11 +1479,20 @@ async function loadDataFromBlob(blob, filename){
       templateArrayBuffer = arr;
       templateName = name || 'template.docx';
 
+      try{
+        window.templateArrayBuffer = arr;
+        window.templateName = templateName;
+      }catch(_){}
+
+
       // 2) TAG index (ugyanaz, mint a helyi fájlnál)
       const parsed = readTemplateFromArrayBuffer(arr);
       currentTemplate = { parts: parsed.parts, contentTypesXml: parsed.contentTypesXml, map: parsed.map };
 
-      try{ window.currentTemplate = currentTemplate; window.templateName = templateName; window.templateArrayBuffer = templateArrayBuffer; }catch(_){ }
+      try{
+        window.currentTemplate = currentTemplate;
+        window.templateName = templateName;
+      }catch(_){}
 
       // 3) UI frissítés (docName + TAG-ek)
       const tagNames = Object.keys(currentTemplate.map || {});
@@ -2294,7 +2309,7 @@ async function listFiles(folderId, token){
         }
         const tagsEl = document.getElementById('tags');
         // ha van global templateName/currentTemplate, a korábbi logika már kitölti; itt csak fallback.
-        if(tagsEl && (!tagsEl.innerHTML || tagsEl.innerHTML.trim()==='')){
+        if(tagsEl && (!tagsEl.innerHTML || tagsEl.innerHTML.trim()==='') && !(window.currentTemplate || currentTemplate)){
           tagsEl.innerHTML = '<span class="small" style="color:var(--muted)">Sablon betöltve a Drive-ról. (TAG-ek feldolgozása folyamatban / nem elérhető.)</span>';
         }
       }
@@ -2340,7 +2355,8 @@ async function listFiles(folderId, token){
         try{
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Sablon letöltése…');
           if(typeof window.downloadDriveTemplateFile==='function') await window.downloadDriveTemplateFile(f);
-          forceRefreshMainUi('template', f.name||'');
+          // UI fallback csak akkor, ha a sablon feldolgozás nem állított be TAG-eket
+          if(!(window.currentTemplate || currentTemplate)) forceRefreshMainUi('template', f.name||'');
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Sablon betöltve: '+(f.name||''));
         }catch(err){
           if(typeof window.updateDriveTemplateStatus==='function') window.updateDriveTemplateStatus('Hiba: '+(err.message||String(err)));
