@@ -682,13 +682,25 @@ document.getElementById('imgZipInput').addEventListener('change', async e=>{ con
 document.getElementById('gen').addEventListener('click', async ()=>{
   try{
     // Drive-os betöltésnél előfordulhat, hogy a globál állapot window.* alatt van;
-    // a generálás mindig ezeket tekintse forrásnak.
-    const tplArr = (window.templateArrayBuffer || templateArrayBuffer);
-    const tplObj = (window.currentTemplate || currentTemplate);
-    if(!tplArr || !tplObj) throw new Error('Nincs betöltött sablon.');
+    // a generálás mindig ezeket tekintse forrásnak, és ha kell, újraépíti a currentTemplate-et.
+    let tplArr = (window.templateArrayBuffer ?? templateArrayBuffer);
+    if(!tplArr && window.__driveTemplateBlob){
+      try{ tplArr = await window.__driveTemplateBlob.arrayBuffer(); }catch(_){ /* ignore */ }
+    }
+    if(!tplArr) throw new Error('Nincs betöltött sablon.');
+
+    let tplObj = (window.currentTemplate ?? currentTemplate);
+    if(!tplObj || !tplObj.map){
+      // Biztonsági újrafeldolgozás: ha a sablon be van töltve (ArrayBuffer megvan), de a parsing állapot elveszett.
+      const parsed = readTemplateFromArrayBuffer(tplArr);
+      tplObj = { parts: parsed.parts, contentTypesXml: parsed.contentTypesXml, map: parsed.map };
+      window.currentTemplate = tplObj;
+    }
+
     // Szinkronizáljuk a lokális változókat is, hogy a további kód egységesen működjön.
     templateArrayBuffer = tplArr;
     currentTemplate = tplObj;
+    if(window.templateName && !templateName) templateName = window.templateName;
 
     if(!dataRows.length) throw new Error('Nincs betöltött adattábla vagy üres.');
     const tagNames=Object.keys(currentTemplate.map);
@@ -1428,6 +1440,7 @@ async function loadDataFromBlob(blob, filename){
     if(!res.ok) throw new Error("Drive letöltési hiba: "+res.status+" "+res.statusText);
 
     const blob = await res.blob();
+    try{ window.__driveTemplateBlob = blob; }catch(_){ }
     await loadDataFromBlob(blob, name);
     try{ log("Drive adattábla betöltve: "+name, "ok"); }catch(_){}
   }
