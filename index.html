@@ -1033,7 +1033,9 @@ const ref=String(value||'').trim(); if(!ref) continue; let arrBuf=null,ext='png'
 
   // A sablon- és adattábla-picker ugyanazt a tokent használja
   async function ensureDriveDataToken(){
-    return await ensureDriveUploadToken(false);
+    const t = await ensureDriveUploadToken(false);
+    if(t) setDriveTokens(t);
+    return t;
   }
 
 
@@ -1273,6 +1275,7 @@ window.fetchImageFromDriveRef = async function fetchImageFromDriveRef(ref){
     await ensureGapiLoadedForData();
     await ensureDrivePicker();
     const token = await ensureDriveDataToken();
+    if(token) setDriveTokens(token);
     if(!token){
       setDriveFolderStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
       return;
@@ -1597,6 +1600,7 @@ const res = await fetch(url, fetchOptions);
     await ensureGapiLoadedForData();
     await ensureDrivePicker();
     const token = await ensureDriveDataToken();
+    if(token) setDriveTokens(token);
     if(!token){
       updateDriveDataStatus("Előbb jelentkezz be a Drive-hoz a felső gombbal.");
       return;
